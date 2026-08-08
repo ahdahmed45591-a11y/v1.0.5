@@ -39,6 +39,9 @@ DATABASES = {
 }
 
 REST_FRAMEWORK = {
+    # JSON uniquement. L'API navigable de DRF exige des templates et
+    # staticfiles, et repondrait du HTML a un navigateur : 500 garanti.
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_AUTHENTICATION_CLASSES": [],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
     "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.AnonRateThrottle"],

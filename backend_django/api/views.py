@@ -199,6 +199,9 @@ def profile(request):
         ("birthDate", "birth_date"),
         ("profession", "profession"),
         ("residence", "residence"),
+        ("identityDocStatus", "identity_doc_status"),
+        ("proofOfAddressStatus", "proof_of_address_status"),
+        ("signatureStatus", "signature_status"),
     ):
         if d.get(src):
             setattr(user, field, d[src])
@@ -361,8 +364,13 @@ def transactions_all(request):
 def create_transaction(request, sess):
     d = request.data
     kind = (d.get("type") or "BUY").upper()
-    qty = int(d.get("quantity") or 1)
-    price = float(d.get("price") or 0)
+    try:
+        qty = int(d.get("quantity") or 1)
+        price = float(d.get("price") or 0)
+    except (TypeError, ValueError):
+        return Response({"error": "Quantité et prix doivent être numériques."}, status=400)
+    if qty <= 0 or price < 0:
+        return Response({"error": "Quantité et prix doivent être positifs."}, status=400)
 
     # select_for_update : deux depots simultanes ne doivent pas ecraser
     # le meme solde (le store Node en memoire avait ce trou).

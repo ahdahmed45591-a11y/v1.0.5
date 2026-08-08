@@ -119,8 +119,17 @@ def main():
     assert call("PATCH", f"/api/admin/users/{user['id']}/suspend", {},
                 token=admin_token)["data"]["kyc"] == "pending"
 
+    # Entrees non numeriques : 400, pas 500
+    call("POST", "/api/transactions",
+         {"ticker": "SNTS", "type": "BUY", "quantity": "beaucoup", "price": 1},
+         token=token, expect=400)
+    call("POST", "/api/transactions",
+         {"ticker": "SNTS", "type": "BUY", "quantity": -5, "price": 1},
+         token=token, expect=400)
+
     call("PATCH", f"/api/admin/users/{user['id']}/kyc", {"status": "verified"}, token=admin_token)
-    call("POST", "/api/auth/update-profile", {"whatsapp": "+2250700000000"}, token=token)
+    call("POST", "/api/auth/update-profile",
+         {"whatsapp": "+2250700000000", "identityDocStatus": "valide"}, token=token)
     call("POST", "/api/auth/upload-document",
          {"docType": "selfie", "fileName": "s.png", "fileBase64": "aGVsbG8="}, token=token)
     call("POST", "/api/auth/upload-document",
@@ -130,6 +139,7 @@ def main():
     updated = next(u for u in call("GET", "/api/admin/users", token=admin_token)["data"]
                    if u["id"] == user["id"])
     assert updated["kyc"] == "verified" and updated["whatsapp"] == "+2250700000000"
+    assert updated["identityDocStatus"] == "valide", updated["identityDocStatus"]
     assert updated["selfieUrl"] == f"/uploads/{user['id']}_selfie_s.png", updated["selfieUrl"]
 
     # Jeton absent ou bidon

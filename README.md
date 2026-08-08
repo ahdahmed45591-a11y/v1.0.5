@@ -1,23 +1,62 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# BAOU Finance — Éléphant Bourse v1.0.5
 
-# Run and deploy your AI Studio app
+Investissement sur la BRVM : application Android, portail administrateur web,
+API Django.
 
-This contains everything you need to run your app locally.
+## Lancer
 
-View your app in AI Studio: https://ai.studio/apps/304ed0d2-a08f-4dd2-a2a9-52814fdc1a00
+Double-cliquez sur `demarrer_local.bat` (Docker Desktop doit tourner), ou :
 
-## Run Locally
+```
+docker compose up --build -d
+```
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+- Portail admin : http://localhost:3000 — `admin@elephantbourse.ci` / `admin2024`
+- API : http://localhost:3001
+- Arrêt : `arreter_local.bat` (les données PostgreSQL survivent dans le volume `pgdata`)
 
+Vérifier que tout le parcours fonctionne :
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
+```
+python backend_django/test_api.py
+```
 
-# v1.0.5
+## Application mobile
+
+Ouvrez le dossier racine dans Android Studio, puis attendez la synchronisation
+Gradle. Sur l'écran de connexion, l'icône engrenage permet de saisir l'URL du
+serveur :
+
+| Cas | URL |
+|---|---|
+| Émulateur | `http://10.0.2.2:3001/api/` |
+| Téléphone en Wi-Fi | `http://[VOTRE_IP]:3001/api/` (`ipconfig`) |
+| Téléphone via Ngrok | `https://xxxx.ngrok-free.app/api/` |
+
+`demarrer_local.bat` ouvre une fenêtre Ngrok qui affiche l'URL à copier.
+
+L'APK est aussi construit à chaque push sur `main` : onglet Actions du dépôt,
+dernier workflow réussi, artefact `app-debug`.
+
+## Structure
+
+| Dossier | Rôle |
+|---|---|
+| `app/` | Application Android (Kotlin, Jetpack Compose) |
+| `admin/` | Portail administrateur (React 18, Vite) |
+| `backend_django/` | API REST (Django 5, DRF, PostgreSQL 16) |
+| `data/brvm_data/` | Historiques de cours BRVM en CSV, montés en lecture seule |
+| `data/uploads/` | Documents KYC envoyés par les clients |
+| `tools/analyse_brvm/` | Scripts d'analyse BRVM, indépendants de l'API |
+
+## Comptes de test
+
+| Rôle | Identifiants |
+|---|---|
+| Admin | `admin@elephantbourse.ci` / `admin2024` |
+
+Les comptes clients se créent depuis l'inscription de l'application mobile.
+
+## Paiement
+
+Dépôt via Wave CI : https://pay.wave.com/m/M_ci_XRkfDq_9M8GP/c/ci/?src=p

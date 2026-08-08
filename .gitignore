@@ -32,3 +32,7 @@ app/build/
 
 # Fichiers accidentels
 Saisissez
+
+# Python
+__pycache__/
+*.pyc

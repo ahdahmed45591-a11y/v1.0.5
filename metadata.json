@@ -1,6 +1,0 @@
-{
-  "name": "Éléphant Bourse",
-  "description": "Votre passerelle vers le marché financier ivoirien (BRVM). Investissez, suivez votre portefeuille et accédez à l'académie en toute sécurité.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

@@ -1,42 +1,48 @@
 services:
-  backend-core:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: baou_finance_core
-    command: node core/server_core.js
-    ports:
-      - "3002:3002"
-    volumes:
-      - ./backend/data:/app/data
+  db:
+    image: postgres:16-alpine
+    container_name: baou_finance_db
     environment:
-      - CORE_PORT=3002
-      - NODE_ENV=production
+      POSTGRES_DB: baou
+      POSTGRES_USER: baou
+      POSTGRES_PASSWORD: baou
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U baou"]
+      interval: 5s
+      retries: 10
     restart: always
 
-  backend-api:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+  backend:
+    build: ./backend_django
     container_name: baou_finance_api
-    command: node api/server_api.js
     ports:
       - "3001:3001"
     environment:
-      - PORT=3001
-      - CORE_SERVICE_URL=http://backend-core:3002
-      - NODE_ENV=production
+      POSTGRES_HOST: db
+      POSTGRES_DB: baou
+      POSTGRES_USER: baou
+      POSTGRES_PASSWORD: baou
+      JWT_SECRET: elephant_secret_key_2024_brvm
+      BRVM_DATA_DIR: /data/brvm_data
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - ./data/brvm_data:/data/brvm_data:ro
+      - ./data/uploads:/data/uploads
     depends_on:
-      - backend-core
+      db:
+        condition: service_healthy
     restart: always
 
   admin:
-    build:
-      context: ./admin
-      dockerfile: Dockerfile
+    build: ./admin
     container_name: baou_finance_admin
     ports:
       - "3000:80"
     depends_on:
-      - backend-api
+      - backend
     restart: always
+
+volumes:
+  pgdata:

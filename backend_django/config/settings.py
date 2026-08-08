@@ -7,8 +7,16 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-dev-key-change-me")
 DEBUG = os.environ.get("DEBUG", "0") == "1"
 ALLOWED_HOSTS = ["*"]  # ponytail: derriere ngrok/railway, filtrage fait en amont
 
-# Meme secret et meme algo que la v1.0.4 : les jetons deja emis restent valides.
-JWT_SECRET = os.environ.get("JWT_SECRET", "elephant_secret_key_2024_brvm")
+# Aucune valeur par defaut hors DEBUG : un secret de repli finit toujours par
+# devenir le secret de production. Le service refuse de demarrer sans.
+JWT_SECRET = os.environ.get("JWT_SECRET") or ("dev-insecure-secret" if DEBUG else "")
+if not JWT_SECRET:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "JWT_SECRET est absent. Renseignez-le dans .env.docker "
+        "(demarrer_local.bat en genere un au premier lancement)."
+    )
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "/data/uploads")
 
 INSTALLED_APPS = [

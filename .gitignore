@@ -36,3 +36,6 @@ Saisissez
 # Python
 __pycache__/
 *.pyc
+
+# Secrets Docker
+.env.docker

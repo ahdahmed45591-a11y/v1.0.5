@@ -2,14 +2,11 @@ services:
   db:
     image: postgres:16-alpine
     container_name: baou_finance_db
-    environment:
-      POSTGRES_DB: baou
-      POSTGRES_USER: baou
-      POSTGRES_PASSWORD: baou
+    env_file: [.env.docker]
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U baou"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       retries: 10
     restart: always
@@ -19,12 +16,9 @@ services:
     container_name: baou_finance_api
     ports:
       - "3001:3001"
+    env_file: [.env.docker]
     environment:
       POSTGRES_HOST: db
-      POSTGRES_DB: baou
-      POSTGRES_USER: baou
-      POSTGRES_PASSWORD: baou
-      JWT_SECRET: elephant_secret_key_2024_brvm
       BRVM_DATA_DIR: /data/brvm_data
       UPLOAD_DIR: /data/uploads
     volumes:

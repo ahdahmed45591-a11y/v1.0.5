@@ -55,6 +55,7 @@ jobs:
 
     env:
       POSTGRES_HOST: localhost
+      JWT_SECRET: secret-de-test-ci-uniquement
       BRVM_DATA_DIR: ${{ github.workspace }}/data/brvm_data
       UPLOAD_DIR: /tmp/uploads
 

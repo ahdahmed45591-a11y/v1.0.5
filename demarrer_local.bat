@@ -11,6 +11,16 @@ echo.
 
 docker info >nul 2>&1 || (echo Docker Desktop n'est pas demarre. Lancez-le puis relancez ce script. & pause & exit /b 1)
 
+rem Secrets locaux, jamais commites. Generes une seule fois, aleatoirement.
+if not exist ".env.docker" (
+  echo Generation des secrets locaux dans .env.docker ...
+  powershell -NoProfile -Command ^
+    "$b=New-Object byte[] 48; (New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes($b);" ^
+    "$p=New-Object byte[] 24; (New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes($p);" ^
+    "Set-Content -Encoding ascii .env.docker @('POSTGRES_DB=baou','POSTGRES_USER=baou',('POSTGRES_PASSWORD='+[Convert]::ToBase64String($p).TrimEnd('=')),('JWT_SECRET='+[Convert]::ToBase64String($b).TrimEnd('=')))"
+  echo Fait. Ce fichier reste sur votre machine.
+)
+
 echo [1/3] Construction et demarrage des conteneurs...
 docker compose up --build -d || (echo Echec du demarrage. Voir : docker compose logs & pause & exit /b 1)
 

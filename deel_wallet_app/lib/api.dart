@@ -49,8 +49,11 @@ class Api {
       throw ApiException('Réponse serveur invalide (${r.statusCode}).');
     }
     if (r.statusCode >= 400) {
+      // DRF renvoie {"detail": "..."} pour ses propres erreurs (405, 401 mal
+      // formes, throttling...), distinct du {"error": ...}/{"message": ...}
+      // des vues ecrites a la main dans ce projet.
       throw ApiException(
-          (body['error'] ?? body['message'] ?? 'Erreur serveur (${r.statusCode}).')
+          (body['error'] ?? body['message'] ?? body['detail'] ?? 'Erreur serveur (${r.statusCode}).')
               .toString());
     }
     return body;

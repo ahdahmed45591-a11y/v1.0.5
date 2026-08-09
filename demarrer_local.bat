@@ -39,6 +39,9 @@ echo Backend pret.
 
 echo.
 echo [3/3] Tunnel NGROK pour l'application mobile...
+rem Evite ERR_NGROK_334 : un tunnel oublie d'une session precedente (fenetre
+rem fermee sans passer par arreter_local.bat) bloque sinon le nouveau.
+taskkill /F /IM ngrok.exe >nul 2>&1
 start "BAOU Ngrok Tunnel" cmd /k "ngrok http 3001"
 ping -n 5 127.0.0.1 >nul
 

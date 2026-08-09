@@ -43,7 +43,7 @@ start "BAOU Ngrok Tunnel" cmd /k "ngrok http 3001"
 ping -n 5 127.0.0.1 >nul
 
 rem L'API locale de ngrok (port 4040) donne l'URL publique sans lire l'autre fenetre.
-for /f "delims=" %%u in ('powershell -NoProfile -Command "try{(Invoke-RestMethod http://127.0.0.1:4040/api/tunnels).tunnels[0].public_url}catch{''}" 2^>nul) do set "NGROK_URL=%%u"
+for /f "delims=" %%u in ('powershell -NoProfile -Command "try{(Invoke-RestMethod http://127.0.0.1:4040/api/tunnels).tunnels[0].public_url}catch{''}" 2^>nul') do set "NGROK_URL=%%u"
 
 start http://localhost:3000
 

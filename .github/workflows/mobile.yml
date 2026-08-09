@@ -1,0 +1,43 @@
+name: Mobile App Build
+
+on:
+  push:
+    branches: [ "main" ]
+    paths: [ "deel_wallet_app/**" ]
+  pull_request:
+    branches: [ "main" ]
+    paths: [ "deel_wallet_app/**" ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    name: Build Flutter APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deel_wallet_app
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        channel: stable
+
+    - name: Install Dependencies
+      run: flutter pub get
+
+    - name: Run Tests
+      run: flutter test
+
+    - name: Build Release APK
+      run: flutter build apk --release
+
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: BAOU-Finance-Mobile.apk
+        path: deel_wallet_app/build/app/outputs/flutter-apk/app-release.apk
+        if-no-files-found: error

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'api.dart';
 import 'screens.dart';
 
 // Orange, blanc, vert.
@@ -45,14 +46,18 @@ final theme = ThemeData(
   ),
 );
 
-void main() => runApp(const BaouFinanceApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Api.loadSettings();
+  runApp(const BaouFinanceApp());
+}
 
 class BaouFinanceApp extends StatelessWidget {
   const BaouFinanceApp({super.key});
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'BAOU Finance',
+        title: 'BAOU',
         debugShowCheckedModeBanner: false,
         theme: theme,
         home: const OnboardingScreen(),

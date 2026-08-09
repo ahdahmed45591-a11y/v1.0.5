@@ -257,6 +257,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _name = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
+  final _confirm = TextEditingController();
   bool _busy = false;
   bool _hide = true;
 
@@ -265,6 +266,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _name.dispose();
     _email.dispose();
     _password.dispose();
+    _confirm.dispose();
     super.dispose();
   }
 
@@ -330,6 +332,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   validator: (v) => (v ?? '').length >= 4
                       ? null
                       : '4 caractères minimum',
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _confirm,
+                  obscureText: _hide,
+                  decoration: const InputDecoration(labelText: 'Confirmer le mot de passe'),
+                  validator: (v) =>
+                      v == _password.text ? null : 'Les mots de passe ne correspondent pas',
                 ),
                 const SizedBox(height: 24),
                 FilledButton(

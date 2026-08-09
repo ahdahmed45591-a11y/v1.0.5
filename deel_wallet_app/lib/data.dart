@@ -209,7 +209,9 @@ class AppState extends ChangeNotifier {
   /// Recharge solde, transactions et portefeuille depuis le serveur.
   /// A appeler apres connexion/inscription et apres chaque depot/achat.
   Future<void> refresh() async {
-    final profile = await Api.get('/api/auth/profile');
+    // /api/auth/profile n'accepte que PATCH/POST cote Django (jamais GET) —
+    // un POST a corps vide se contente de renvoyer l'utilisateur courant.
+    final profile = await Api.post('/api/auth/profile', {});
     _applyUser((profile['user'] as Map?)?.cast<String, dynamic>() ?? {});
     transactions = await Repo.transactions();
     _recomputeFromTransactions();

@@ -1,21 +1,5 @@
-*.iml
-.gradle
-.kotlin
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
 .DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-local.properties
 .env
-debug.keystore
 
 # Node.js dependencies
 node_modules/
@@ -25,10 +9,6 @@ dist/
 *.db-journal
 *.db-shm
 *.db-wal
-
-# Fichiers Android générés
-app/build/
-/app/release/
 
 # Fichiers accidentels
 Saisissez

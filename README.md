@@ -1,6 +1,6 @@
 # BAOU Finance — Éléphant Bourse v1.0.5
 
-Investissement sur la BRVM : application Android, portail administrateur web,
+Investissement sur la BRVM : application mobile, portail administrateur web,
 API Django.
 
 ## Lancer
@@ -23,26 +23,21 @@ python backend_django/test_api.py
 
 ## Application mobile
 
-Ouvrez le dossier racine dans Android Studio, puis attendez la synchronisation
-Gradle. Sur l'écran de connexion, l'icône engrenage permet de saisir l'URL du
-serveur :
+L'app mobile (Flutter, `deel_wallet_app/`) n'est pas versionnée dans ce dépôt.
+Elle se connecte à l'API selon l'URL configurée dans `lib/api.dart` :
 
 | Cas | URL |
 |---|---|
-| Émulateur | `http://10.0.2.2:3001/api/` |
-| Téléphone en Wi-Fi | `http://[VOTRE_IP]:3001/api/` (`ipconfig`) |
-| Téléphone via Ngrok | `https://xxxx.ngrok-free.app/api/` |
+| Émulateur | `http://10.0.2.2:3001` |
+| Téléphone en Wi-Fi | `http://[VOTRE_IP]:3001` (`ipconfig`) |
+| Téléphone via Ngrok | `https://xxxx.ngrok-free.app` |
 
 `demarrer_local.bat` ouvre une fenêtre Ngrok qui affiche l'URL à copier.
-
-L'APK est aussi construit à chaque push sur `main` : onglet Actions du dépôt,
-dernier workflow réussi, artefact `app-debug`.
 
 ## Structure
 
 | Dossier | Rôle |
 |---|---|
-| `app/` | Application Android (Kotlin, Jetpack Compose) |
 | `admin/` | Portail administrateur (React 18, Vite) |
 | `backend_django/` | API REST (Django 5, DRF, PostgreSQL 16) |
 | `data/brvm_data/` | Historiques de cours BRVM en CSV, montés en lecture seule |

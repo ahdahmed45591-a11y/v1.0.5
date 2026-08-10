@@ -3,6 +3,13 @@
 Identique au comportement Node (data/store.js + utils/brvmDataReader.js) :
 les cours ne sont pas en base, ils sont charges au demarrage depuis
 brvm_data/<TICKER>/<TICKER>.daily.csv quand le fichier existe.
+
+Source des CSV : https://github.com/Fredysessie/brvm-data-public (66
+tickers, mis a jour ~15 min pendant les seances). SEED garde les
+nom/secteur connus pour les valeurs historiques ; tous les autres dossiers
+de tickers presents dans brvm_data/ sont exposes aussi (stocks(), plus
+bas) avec le code ticker en guise de nom — capitalisation/PE/dividende
+restent a 0 pour eux, un simple CSV OHLCV ne donne pas ces fondamentaux.
 """
 
 import csv
@@ -57,25 +64,56 @@ def read_ticker(ticker):
             rows = [r for r in csv.reader(fh) if r and r[0].strip()]
     except OSError:
         return None
-    if len(rows) < 3:  # entete + 2 seances minimum
+    if rows and rows[0][0] == "Date":
+        rows = rows[1:]  # entete Date,Open,High,Low,Close,Volume
+    if len(rows) < 2:
         return None
     close, prev = float(rows[-1][4]), float(rows[-2][4])
     change = ((close - prev) / prev * 100) if prev else 0.0
+    year = rows[-252:]  # ~1 an de seances pour le plus haut/bas 52 sem.
     return {
         "price": close,
         "prevClose": prev,
         "change": round(change, 2),
         "volume": int(float(rows[-1][5] or 0)),
+        "high52": max(float(r[2]) for r in year),
+        "low52": min(float(r[3]) for r in year),
     }
+
+
+def _extra_folders():
+    """Dossiers de tickers reels hors SEED : tout brvm_data/<TICKER>/ sauf
+    les indices (BRVM30, BRVM-CB, ...) et currency_data/."""
+    try:
+        names = os.listdir(BRVM_DATA_DIR)
+    except OSError:
+        return []
+    return sorted(
+        d for d in names
+        if os.path.isdir(os.path.join(BRVM_DATA_DIR, d))
+        and d != "currency_data"
+        and not d.startswith("BRVM")
+    )
 
 
 @lru_cache(maxsize=1)
 def stocks():
     """Charge une fois par process, comme le module JS."""
     out = []
+    seen = set()
     for s in SEED:
+        folder = TICKER_MAP.get(s["ticker"], s["ticker"])
+        seen.add(folder)
         real = read_ticker(s["ticker"])
         out.append({**s, **real} if real else dict(s))
+    for folder in _extra_folders():
+        if folder in seen:
+            continue
+        real = read_ticker(folder)
+        if not real:
+            continue
+        out.append({"ticker": folder, "company": folder, "sector": "BRVM",
+                     "marketCap": "", "pe": 0, "dividend": 0, "yield": 0, **real})
     return out
 
 
@@ -88,8 +126,9 @@ if __name__ == "__main__":
     # Verification : le parseur CSV doit rendre les memes champs que le JS.
     assert find("SNTS") is not None
     assert find("inconnu") is None
-    assert len(stocks()) == len(SEED)
+    assert len(stocks()) >= len(SEED)  # + tickers reels hors SEED, si data/brvm_data present
     for s in stocks():
         assert set(s) >= {"ticker", "price", "prevClose", "change", "volume"}
         assert isinstance(s["price"], (int, float))
-    print(f"OK — {len(stocks())} titres, {sum(1 for s in SEED if read_ticker(s['ticker']))} depuis CSV")
+    print(f"OK — {len(stocks())} titres ({len(SEED)} SEED + {len(stocks()) - len(SEED)} hors SEED), "
+          f"{sum(1 for s in SEED if read_ticker(s['ticker']))} depuis CSV")

@@ -54,7 +54,9 @@ def main():
     call("GET", "/api/admin/users", token=token, expect=403)
 
     stocks = call("GET", "/api/stocks")["data"]
-    assert len(stocks) == 26, len(stocks)
+    # 26 SEED + tickers reels supplementaires lus depuis data/brvm_data/
+    # (voir brvm.py) -- pas de nombre fige, le jeu de donnees est mis a jour.
+    assert len(stocks) >= 26, len(stocks)
     snts = call("GET", "/api/stocks/SNTS")["data"]
     call("GET", "/api/stocks/ZZZZ", expect=404)
 

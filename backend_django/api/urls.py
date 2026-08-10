@@ -14,6 +14,7 @@ urlpatterns = [
     path("api/auth/profile", views.profile),
     path("api/auth/update-profile", views.profile),
     path("api/auth/upload-document", views.upload_document),
+    path("api/contract", views.contract),
     path("api/auth/chat", views.my_chat),
     path("api/auth/support", views.support),
 
@@ -33,5 +34,10 @@ urlpatterns = [
     path("api/admin/support/<str:ticket_id>/status", views.admin_ticket_status),
     path("api/admin/chat/<str:user_id>", views.admin_chat),
 
+    # ponytail: /uploads/ sert les pieces KYC (CNI, selfie...) sans auth --
+    # deja le comportement pre-existant (l'admin React les affiche en <img
+    # src> direct). URL non devinable en pratique (nom = userId + docType +
+    # nom de fichier) mais pas un vrai controle d'acces ; passer par une vue
+    # authentifiee si des documents sensibles doivent etre proteges.
     re_path(r"^uploads/(?P<path>.*)$", serve, {"document_root": settings.UPLOAD_DIR}),
 ]

@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 
 import 'api.dart';
 import 'data.dart';
@@ -385,7 +388,14 @@ class _ShellState extends State<Shell> {
   Widget build(BuildContext context) {
     final tabs = [HomeTab(onNavigate: _goTo), const BrvmTab(), const ProfileTab()];
     return Scaffold(
-      body: SafeArea(child: tabs[_i]),
+      body: SafeArea(
+        child: Column(
+          children: [
+            const KycBanner(),
+            Expanded(child: tabs[_i]),
+          ],
+        ),
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _i,
         indicatorColor: brandOrange,
@@ -1366,12 +1376,21 @@ class ProfileTab extends StatelessWidget {
                     Text(app.userEmail, style: const TextStyle(color: Colors.black54)),
                   const SizedBox(height: 8),
                   GestureDetector(
-                    onTap: () => _infoDialog(context, 'Vérification KYC',
-                        "Votre dossier (CNI, selfie, justificatif) est en cours d'examen. Vous recevrez une notification une fois validé."),
+                    onTap: () => app.kycVerified
+                        ? _infoDialog(context, 'Vérification KYC', 'Votre compte est vérifié.')
+                        : Navigator.push(
+                            context, MaterialPageRoute(builder: (_) => const KycFormScreen())),
                     child: Chip(
-                      label: const Text('Vérification en attente'),
-                      backgroundColor: brandOrange.withValues(alpha: .12),
-                      labelStyle: const TextStyle(color: brandOrange),
+                      label: Text(app.kycVerified
+                          ? 'Compte vérifié'
+                          : app.kyc == 'suspended'
+                              ? 'Compte suspendu'
+                              : (app.kycDocsSubmitted && app.contractSigned)
+                                  ? 'Vérification en attente'
+                                  : 'Dossier à compléter'),
+                      backgroundColor: (app.kycVerified ? Colors.green : brandOrange)
+                          .withValues(alpha: .12),
+                      labelStyle: TextStyle(color: app.kycVerified ? Colors.green[800] : brandOrange),
                       side: BorderSide.none,
                     ),
                   ),
@@ -1401,8 +1420,8 @@ class ProfileTab extends StatelessWidget {
                     leading: const Icon(Icons.description_outlined),
                     title: const Text('Documents & KYC'),
                     trailing: const Icon(Icons.chevron_right),
-                    onTap: () => _infoDialog(context, 'Documents',
-                        'Pièces requises : CNI recto/verso, selfie, justificatif de domicile.'),
+                    onTap: () => Navigator.push(
+                        context, MaterialPageRoute(builder: (_) => const KycFormScreen())),
                   ),
                   const Divider(height: 1),
                   ListTile(
@@ -1494,6 +1513,299 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ],
           ),
+        ),
+      );
+}
+
+// -------------------------------------------------------------------- kyc
+
+/// Bandeau permanent tant que le compte n'est pas verifie par l'admin :
+/// le client peut naviguer dans l'app mais create_transaction (cote
+/// Django) refuse toute operation d'argent jusqu'a app.kycVerified.
+class KycBanner extends StatelessWidget {
+  const KycBanner({super.key});
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: app,
+        builder: (context, _) {
+          if (app.kycVerified) return const SizedBox.shrink();
+          final String text;
+          if (app.kyc == 'suspended') {
+            text = "Compte suspendu par l'administrateur — contactez le support.";
+          } else if (app.kycDocsSubmitted && app.contractSigned) {
+            text = 'Dossier KYC en cours de vérification par l\'administrateur.';
+          } else {
+            text = 'Complétez votre dossier KYC et signez le contrat SGI pour trader.';
+          }
+          return GestureDetector(
+            onTap: () => Navigator.push(
+                context, MaterialPageRoute(builder: (_) => const KycFormScreen())),
+            child: Container(
+              width: double.infinity,
+              color: brandOrange.withValues(alpha: .12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                children: [
+                  const Icon(Icons.lock_outline, size: 18, color: brandOrange),
+                  const SizedBox(width: 8),
+                  Expanded(
+                      child: Text(text,
+                          style: const TextStyle(
+                              color: brandOrange, fontSize: 12.5, fontWeight: FontWeight.w600))),
+                  const Icon(Icons.chevron_right, size: 18, color: brandOrange),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+}
+
+const Map<String, String> _kycDocLabels = {
+  'selfie': 'Photo de votre visage',
+  'cni_recto': "Pièce d'identité (CNI/Passeport) — RECTO",
+  'cni_verso': "Pièce d'identité (CNI/Passeport) — VERSO",
+  'proof_address': 'Justificatif de domicile (facture CIE/SODECI, < 3 mois)',
+};
+
+class KycFormScreen extends StatefulWidget {
+  const KycFormScreen({super.key});
+  @override
+  State<KycFormScreen> createState() => _KycFormScreenState();
+}
+
+class _KycFormScreenState extends State<KycFormScreen> {
+  final _picker = ImagePicker();
+  late final _name = TextEditingController(text: app.userName);
+  late final _whatsapp = TextEditingController(text: app.whatsapp);
+  final Map<String, XFile?> _photos = {
+    'selfie': null,
+    'cni_recto': null,
+    'cni_verso': null,
+    'proof_address': null,
+  };
+  bool _busy = false;
+
+  bool _already(String docType) => switch (docType) {
+        'selfie' => app.selfieUrl != null,
+        'cni_recto' => app.cniRectoUrl != null,
+        'cni_verso' => app.cniVersoUrl != null,
+        'proof_address' => app.proofAddressUrl != null,
+        _ => false,
+      };
+
+  Future<void> _pick(String docType) async {
+    final photo =
+        await _picker.pickImage(source: ImageSource.camera, imageQuality: 70, maxWidth: 1600);
+    if (photo == null) return;
+    setState(() => _photos[docType] = photo);
+  }
+
+  bool get _canSubmit =>
+      _name.text.trim().isNotEmpty &&
+      _whatsapp.text.trim().isNotEmpty &&
+      _photos.keys.every((k) => _photos[k] != null || _already(k));
+
+  Future<void> _submit() async {
+    setState(() => _busy = true);
+    try {
+      await Repo.updateProfile(_name.text.trim(), whatsapp: _whatsapp.text.trim());
+      for (final entry in _photos.entries) {
+        final file = entry.value;
+        if (file == null) continue; // deja envoye lors d'une soumission precedente
+        final bytes = await file.readAsBytes();
+        await Repo.uploadDocument(entry.key, file.name, base64Encode(bytes));
+      }
+      if (!mounted) return;
+      if (!app.contractSigned) {
+        Navigator.pushReplacement(
+            context, MaterialPageRoute(builder: (_) => const ContractScreen()));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("Dossier envoyé. En attente de validation par l'administrateur.")));
+        Navigator.pop(context);
+      }
+    } on ApiException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Widget _slot(String docType) {
+    final file = _photos[docType];
+    final done = file != null || _already(docType);
+    return Card(
+      child: ListTile(
+        leading: Icon(done ? Icons.check_circle : Icons.camera_alt_outlined,
+            color: done ? Colors.green : Colors.black45),
+        title: Text(_kycDocLabels[docType]!),
+        subtitle: Text(file != null ? file.name : (done ? 'Déjà envoyé' : 'Non fourni')),
+        trailing: TextButton(
+            onPressed: () => _pick(docType), child: Text(done ? 'Reprendre' : 'Prendre la photo')),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Dossier KYC')),
+        body: ListenableBuilder(
+          listenable: app,
+          builder: (context, _) => ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              if (app.kyc == 'suspended')
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: .1),
+                      borderRadius: BorderRadius.circular(8)),
+                  child: const Text(
+                      "Votre dossier a été rejeté ou votre compte suspendu. "
+                      "Renvoyez vos pièces pour repasser en revue.",
+                      style: TextStyle(color: Colors.red)),
+                ),
+              const Text('Informations personnelles',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _name,
+                decoration: const InputDecoration(labelText: 'Nom complet'),
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _whatsapp,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                    labelText: 'Numéro WhatsApp', hintText: '07 00 00 00 00'),
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 20),
+              const Text('Pièces justificatives',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+              const SizedBox(height: 8),
+              _slot('selfie'),
+              _slot('cni_recto'),
+              _slot('cni_verso'),
+              _slot('proof_address'),
+              const SizedBox(height: 20),
+              FilledButton(
+                onPressed: (_canSubmit && !_busy) ? _submit : null,
+                child: _busy
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : Text(app.contractSigned ? 'Envoyer le dossier' : 'Continuer vers le contrat'),
+              ),
+            ],
+          ),
+        ),
+      );
+}
+
+class ContractScreen extends StatefulWidget {
+  const ContractScreen({super.key});
+  @override
+  State<ContractScreen> createState() => _ContractScreenState();
+}
+
+class _ContractScreenState extends State<ContractScreen> {
+  late Future<String> _future = Repo.contractText();
+  final _signature = TextEditingController();
+  bool _accepted = false;
+  bool _busy = false;
+
+  Future<void> _sign() async {
+    final name = _signature.text.trim();
+    if (name.isEmpty || !_accepted) return;
+    setState(() => _busy = true);
+    try {
+      final receipt = 'SIGNATURE ELECTRONIQUE\nContrat SGI BRVM\n'
+          'Signé par : $name\nDate : ${DateTime.now().toIso8601String()}\n'
+          "J'ai lu et j'accepte les termes du contrat.";
+      await Repo.uploadDocument('contract', 'signature_${DateTime.now().millisecondsSinceEpoch}.txt',
+          base64Encode(utf8.encode(receipt)));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Contrat signé. Dossier envoyé pour validation.')));
+      Navigator.pop(context);
+    } on ApiException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Contrat SGI BRVM')),
+        body: FutureBuilder<String>(
+          future: _future,
+          builder: (context, snap) {
+            if (!snap.hasData && !snap.hasError) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snap.hasError) {
+              return Center(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text('${snap.error}'),
+                  TextButton(
+                      onPressed: () => setState(() => _future = Repo.contractText()),
+                      child: const Text('Réessayer')),
+                ]),
+              );
+            }
+            return Column(
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(snap.data!, style: const TextStyle(height: 1.5)),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: const BoxDecoration(
+                      border: Border(top: BorderSide(color: Colors.black12)), color: Colors.white),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      CheckboxListTile(
+                        value: _accepted,
+                        onChanged: (v) => setState(() => _accepted = v ?? false),
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        title: const Text("J'ai lu et j'accepte les termes du contrat SGI BRVM."),
+                      ),
+                      TextField(
+                        controller: _signature,
+                        decoration: const InputDecoration(
+                            labelText: 'Tapez votre nom complet pour signer',
+                            hintText: 'Signature électronique'),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton(
+                        onPressed:
+                            (_accepted && _signature.text.trim().isNotEmpty && !_busy) ? _sign : null,
+                        child: _busy
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Text('Signer et envoyer'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       );
 }

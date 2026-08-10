@@ -56,9 +56,12 @@ function mapUser(u: any): User {
     profession: u.profession || 'Non renseignée',
     residence: u.residence || 'Abidjan, Côte d\'Ivoire',
     whatsapp: u.whatsapp || 'Non renseigné',
-    identityDocStatus: u.identityDocStatus || 'Présent (CNI / Passeport)',
-    proofOfAddressStatus: u.proofOfAddressStatus || 'Présent (Facture CIE / SODECI)',
-    signatureStatus: u.signatureStatus || 'Contrat SGI Signé Numériquement',
+    // ponytail: plus de fallback "Présent" par defaut -- avant ce correctif
+    // un dossier vide affichait quand meme "Présent (CNI / Passeport)" a
+    // l'admin, ce qui pouvait faire valider un compte sans aucune piece.
+    identityDocStatus: u.identityDocStatus || 'Non fourni',
+    proofOfAddressStatus: u.proofOfAddressStatus || 'Non fourni',
+    signatureStatus: u.signatureStatus || 'Non signé',
     cniRectoUrl: buildDocUrl(u.cniRectoUrl),
     cniVersoUrl: buildDocUrl(u.cniVersoUrl),
     selfieUrl: buildDocUrl(u.selfieUrl),

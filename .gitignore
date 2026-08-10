@@ -19,3 +19,6 @@ __pycache__/
 
 # Secrets Docker
 .env.docker
+
+# Pieces KYC uploadees par les clients (donnees, pas du code)
+data/uploads/

@@ -201,9 +201,24 @@ class Repo {
     await login(email, password);
   }
 
-  static Future<void> updateProfile(String name) async {
-    final res = await Api.patch('/api/auth/profile', {'firstName': name});
+  static Future<void> updateProfile(String name, {String? whatsapp}) async {
+    final body = {'firstName': name, if (whatsapp != null) 'whatsapp': whatsapp};
+    final res = await Api.patch('/api/auth/profile', body);
     app._applyUser((res['user'] as Map?)?.cast<String, dynamic>() ?? {});
+  }
+
+  /// Envoie une piece KYC (photo prise via image_picker, deja en base64).
+  /// docType : cni_recto | cni_verso | selfie | proof_address | contract.
+  static Future<void> uploadDocument(String docType, String fileName, String fileBase64) async {
+    final res = await Api.post('/api/auth/upload-document',
+        {'docType': docType, 'fileName': fileName, 'fileBase64': fileBase64});
+    final user = (res['user'] as Map?)?.cast<String, dynamic>();
+    if (user != null) app._applyUser(user);
+  }
+
+  static Future<String> contractText() async {
+    final res = await Api.get('/api/contract');
+    return (res['text'] ?? '').toString();
   }
 }
 
@@ -218,10 +233,29 @@ class AppState extends ChangeNotifier {
   List<Holding> holdings = [];
   List<Txn> transactions = [];
 
+  // KYC : "pending" (verrouille, dossier pas encore valide), "verified"
+  // (deverrouille), "suspended" (bloque par l'admin). Cf. create_transaction
+  // cote Django, qui applique le meme verrou — ceci n'est que l'affichage.
+  String kyc = 'pending';
+  String whatsapp = '';
+  String? cniRectoUrl, cniVersoUrl, selfieUrl, proofAddressUrl, contractUrl;
+
+  bool get kycVerified => kyc == 'verified';
+  bool get kycDocsSubmitted =>
+      cniRectoUrl != null && cniVersoUrl != null && selfieUrl != null && proofAddressUrl != null;
+  bool get contractSigned => contractUrl != null;
+
   void _applyUser(Map<String, dynamic> u) {
     if (u['name'] != null) userName = u['name'].toString();
     if (u['email'] != null) userEmail = u['email'].toString();
     if (u['balance'] != null) balance = (u['balance'] as num).toDouble();
+    if (u['kyc'] != null) kyc = u['kyc'].toString();
+    if (u['whatsapp'] != null) whatsapp = u['whatsapp'].toString();
+    cniRectoUrl = (u['cniRectoUrl'] as String?);
+    cniVersoUrl = (u['cniVersoUrl'] as String?);
+    selfieUrl = (u['selfieUrl'] as String?);
+    proofAddressUrl = (u['proofAddressUrl'] as String?);
+    contractUrl = (u['contractUrl'] as String?);
     notifyListeners();
   }
 
@@ -272,6 +306,9 @@ class AppState extends ChangeNotifier {
     transactions = [];
     userName = 'Utilisateur';
     userEmail = '';
+    kyc = 'pending';
+    whatsapp = '';
+    cniRectoUrl = cniVersoUrl = selfieUrl = proofAddressUrl = contractUrl = null;
     notifyListeners();
   }
 }

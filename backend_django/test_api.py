@@ -60,16 +60,54 @@ def main():
     snts = call("GET", "/api/stocks/SNTS")["data"]
     call("GET", "/api/stocks/ZZZZ", expect=404)
 
-    # Achat sans provision -> refuse
+    # ── Verrou KYC : tant que non verifie, aucune operation d'argent ────
+    call("POST", "/api/transactions",
+         {"type": "DEPOSIT", "price": 1000, "paymentMethod": "Wave CI"},
+         token=token, expect=403)
     call("POST", "/api/transactions",
          {"ticker": "SNTS", "type": "BUY", "quantity": 1, "price": snts["price"]},
-         token=token, expect=400)
+         token=token, expect=403)
+
+    # Faille corrigee : le client ne peut plus s'auto-valider via son profil.
+    call("POST", "/api/auth/update-profile", {"kycStatus": "verified"}, token=token)
+    still_pending = call("POST", "/api/auth/profile", {}, token=token)["user"]
+    assert still_pending["kyc"] == "pending", still_pending
+    call("POST", "/api/transactions",
+         {"type": "DEPOSIT", "price": 1000, "paymentMethod": "Wave CI"},
+         token=token, expect=403)
+
+    # Documents KYC : upload -> statuts auto-deduits, contrat servi par l'API
+    contract_text = call("GET", "/api/contract", token=token)["text"]
+    assert "SGI" in contract_text and len(contract_text) > 100
+    call("POST", "/api/auth/upload-document",
+         {"docType": "cni_recto", "fileName": "recto.jpg", "fileBase64": "aGVsbG8="}, token=token)
+    call("POST", "/api/auth/upload-document",
+         {"docType": "cni_verso", "fileName": "verso.jpg", "fileBase64": "aGVsbG8="}, token=token)
+    call("POST", "/api/auth/upload-document",
+         {"docType": "proof_address", "fileName": "facture.jpg", "fileBase64": "aGVsbG8="}, token=token)
+    call("POST", "/api/auth/upload-document",
+         {"docType": "contract", "fileName": "signature.txt", "fileBase64": "aGVsbG8="}, token=token)
+    with_docs = next(u for u in call("GET", "/api/admin/users", token=admin_token)["data"]
+                      if u["id"] == user["id"])
+    assert with_docs["identityDocStatus"] == "Reçu, en attente de vérification", with_docs
+    assert with_docs["proofOfAddressStatus"] == "Reçu, en attente de vérification", with_docs
+    assert with_docs["signatureStatus"].startswith("Signé électroniquement"), with_docs
+    assert with_docs["cniRectoUrl"] == f"/uploads/{user['id']}_cni_recto_recto.jpg"
+
+    # Admin verifie le dossier -> deverrouillage
+    verified = call("PATCH", f"/api/admin/users/{user['id']}/kyc", {"status": "verified"}, token=admin_token)["data"]
+    assert verified["kyc"] == "verified", verified
 
     # Depot : credite immediatement, statut validated
     dep = call("POST", "/api/transactions",
                {"type": "DEPOSIT", "price": 500000, "paymentMethod": "Wave CI"},
                token=token, expect=201)["data"]
     assert dep["status"] == "validated" and dep["grandTotal"] == 500000, dep
+
+    # Achat sans provision suffisante -> refuse (plus le verrou, le solde)
+    call("POST", "/api/transactions",
+         {"ticker": "SNTS", "type": "BUY", "quantity": 10_000_000, "price": snts["price"]},
+         token=token, expect=400)
 
     # Achat : frais 0,5 % + TVA 18 % sur les frais, statut pending
     qty, price = 2, 1000.0
@@ -96,6 +134,14 @@ def main():
                     {"reason": "Test"}, token=admin_token)["data"]
     assert rejected["status"] == "rejected" and rejected["rejectionReason"] == "Test"
 
+    # Entrees non numeriques : 400, pas 500
+    call("POST", "/api/transactions",
+         {"ticker": "SNTS", "type": "BUY", "quantity": "beaucoup", "price": 1},
+         token=token, expect=400)
+    call("POST", "/api/transactions",
+         {"ticker": "SNTS", "type": "BUY", "quantity": -5, "price": 1},
+         token=token, expect=400)
+
     # Cloisonnement : le client ne voit que ses transactions
     mine = call("GET", "/api/transactions", token=token)["data"]
     assert {t["userId"] for t in mine} == {user["id"]}, "fuite de transactions entre comptes"
@@ -115,23 +161,21 @@ def main():
                   {"status": "FERME"}, token=admin_token)["data"]
     assert closed["status"] == "FERME", closed
 
-    # Suspension : bascule, et la reactivation repasse par pending
+    # Suspension : bascule, verrouille de nouveau, et la reactivation
+    # repasse par "pending" (pas "verified") -- toujours verrouille.
     assert call("PATCH", f"/api/admin/users/{user['id']}/suspend", {},
                 token=admin_token)["data"]["kyc"] == "suspended"
+    call("POST", "/api/transactions",
+         {"type": "DEPOSIT", "price": 1000, "paymentMethod": "Wave CI"},
+         token=token, expect=403)
     assert call("PATCH", f"/api/admin/users/{user['id']}/suspend", {},
                 token=admin_token)["data"]["kyc"] == "pending"
-
-    # Entrees non numeriques : 400, pas 500
     call("POST", "/api/transactions",
-         {"ticker": "SNTS", "type": "BUY", "quantity": "beaucoup", "price": 1},
-         token=token, expect=400)
-    call("POST", "/api/transactions",
-         {"ticker": "SNTS", "type": "BUY", "quantity": -5, "price": 1},
-         token=token, expect=400)
+         {"type": "DEPOSIT", "price": 1000, "paymentMethod": "Wave CI"},
+         token=token, expect=403)
 
     call("PATCH", f"/api/admin/users/{user['id']}/kyc", {"status": "verified"}, token=admin_token)
-    call("POST", "/api/auth/update-profile",
-         {"whatsapp": "+2250700000000", "identityDocStatus": "valide"}, token=token)
+    call("POST", "/api/auth/update-profile", {"whatsapp": "+2250700000000"}, token=token)
     call("POST", "/api/auth/upload-document",
          {"docType": "selfie", "fileName": "s.png", "fileBase64": "aGVsbG8="}, token=token)
     call("POST", "/api/auth/upload-document",
@@ -141,7 +185,7 @@ def main():
     updated = next(u for u in call("GET", "/api/admin/users", token=admin_token)["data"]
                    if u["id"] == user["id"])
     assert updated["kyc"] == "verified" and updated["whatsapp"] == "+2250700000000"
-    assert updated["identityDocStatus"] == "valide", updated["identityDocStatus"]
+    assert updated["identityDocStatus"] == "Reçu, en attente de vérification", updated["identityDocStatus"]
     assert updated["selfieUrl"] == f"/uploads/{user['id']}_selfie_s.png", updated["selfieUrl"]
 
     # Jeton absent ou bidon

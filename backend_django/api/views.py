@@ -193,20 +193,37 @@ def profile(request):
     first, last = d.get("firstName"), d.get("lastName")
     if first or last:
         user.name = f"{first or ''} {last or ''}".strip()
+    # ponytail: kyc/identityDocStatus/proofOfAddressStatus/signatureStatus
+    # retires du champ modifiable par le client -- avant ce correctif un
+    # simple PATCH /api/auth/profile {"kycStatus":"verified"} suffisait a
+    # s'auto-valider et contournait entierement la revue admin (voir aussi
+    # le verrou dans create_transaction). Seul admin_user_kyc peut les changer.
     for src, field in (
-        ("kycStatus", "kyc"),
         ("whatsapp", "whatsapp"),
         ("birthDate", "birth_date"),
         ("profession", "profession"),
         ("residence", "residence"),
-        ("identityDocStatus", "identity_doc_status"),
-        ("proofOfAddressStatus", "proof_of_address_status"),
-        ("signatureStatus", "signature_status"),
     ):
         if d.get(src):
             setattr(user, field, d[src])
     user.save()
     return Response({"success": True, "user": user.as_dict()})
+
+
+CONTRACT_PATH = os.path.join(os.path.dirname(__file__), "contract_sgi_brvm.txt")
+
+
+@api_view(["GET"])
+@require_auth()
+def contract(request):
+    # Fichier texte simple, pas de modele/DB : la SGI edite le .txt pour
+    # changer le contrat, sans reconstruire ni redeployer l'app mobile.
+    try:
+        with open(CONTRACT_PATH, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        text = "Contrat indisponible pour le moment."
+    return Response({"success": True, "text": text})
 
 
 DOC_FIELDS = {
@@ -256,8 +273,22 @@ def upload_document(request):
     docs = dict(user.documents or {})
     docs[doc_type] = {"fileName": file_name, "uploadedAt": now_iso(), "status": "uploaded", "url": url}
     user.documents = docs
+
+    # Statuts lisibles pour l'admin (UserManagementView les affiche deja) :
+    # deduits de la presence des URLs, pas d'un champ separe a maintenir.
+    if user.cni_recto_url and user.cni_verso_url:
+        user.identity_doc_status = "Reçu, en attente de vérification"
+    if user.proof_address_url:
+        user.proof_of_address_status = "Reçu, en attente de vérification"
+    if user.contract_url:
+        user.signature_status = f"Signé électroniquement le {now_iso()[:10]}"
+    # Un dossier rejete qui reenvoie une piece redevient "pending" : sinon
+    # le client reste verrouille sans jamais repasser devant l'admin.
+    if user.kyc == "suspended":
+        user.kyc = "pending"
+
     user.save()
-    return Response({"success": True, "message": f'Document "{doc_type}" reçu avec succès.'})
+    return Response({"success": True, "message": f'Document "{doc_type}" reçu avec succès.', "user": user.as_dict()})
 
 
 # ── Chat & support ──────────────────────────────────────────────────────
@@ -378,6 +409,11 @@ def create_transaction(request, sess):
         user = User.objects.select_for_update().filter(id=sess["userId"]).first()
         if not user:
             return Response({"error": "Utilisateur introuvable."}, status=404)
+        if user.kyc != "verified":
+            return Response(
+                {"error": "Compte verrouille : dossier KYC et contrat SGI a valider avant toute operation."},
+                status=403,
+            )
 
         if kind in ("DEPOSIT", "RECHARGE"):
             amount = money(price)

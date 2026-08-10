@@ -1,0 +1,46 @@
+CONTRAT D'OUVERTURE DE COMPTE TITRES
+Société de Gestion et d'Intermédiation (SGI) — Marché BRVM
+=============================================================
+
+Entre :
+La Société de Gestion et d'Intermédiation BAOU Finance, membre agréé de la
+Bourse Régionale des Valeurs Mobilières (BRVM), sous le contrôle du Conseil
+Régional de l'Épargne Publique et des Marchés Financiers (CREPMF / AMF-UMOA),
+
+Et :
+Le client identifié par les informations et pièces fournies lors de son
+inscription sur l'application BAOU Finance (ci-après "le Client").
+
+Article 1 — Objet
+Le présent contrat a pour objet l'ouverture d'un compte titres au nom du
+Client et l'octroi d'un mandat à la SGI pour l'exécution, pour son compte,
+d'ordres d'achat et de vente de valeurs mobilières cotées à la BRVM.
+
+Article 2 — Obligations du Client
+Le Client certifie l'exactitude des informations et documents transmis
+(pièce d'identité, justificatif de domicile, photo). Le Client s'engage à
+ne transmettre des ordres que dans la limite des fonds disponibles sur son
+compte, immédiatement gelés à la soumission de chaque ordre d'achat.
+
+Article 3 — Obligations de la SGI
+La SGI s'engage à exécuter les ordres transmis par le Client aux conditions
+de marché en vigueur, à tenir le compte titres du Client et à lui rendre
+compte de toute opération réalisée.
+
+Article 4 — Frais
+Chaque opération est soumise à une commission de 0,5 % du montant de la
+transaction, majorée de la TVA en vigueur (18 %).
+
+Article 5 — Durée et résiliation
+Le présent contrat est conclu pour une durée indéterminée. Chacune des
+parties peut y mettre fin à tout moment, sous réserve du dénouement des
+opérations en cours.
+
+Article 6 — Droit applicable
+Le présent contrat est soumis à la réglementation du CREPMF/AMF-UMOA et aux
+règles de fonctionnement de la BRVM.
+
+En signant électroniquement ce document, le Client reconnaît avoir lu et
+accepté l'intégralité des termes ci-dessus.
+
+--- Document exemple, à personnaliser par l'administration BAOU Finance. ---

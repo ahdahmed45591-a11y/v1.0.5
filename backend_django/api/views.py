@@ -440,6 +440,14 @@ def create_transaction(request, sess):
             payment_method=d.get("paymentMethod") or "Non spécifié",
             submitted_at=now_iso(),
         )
+
+        if kind == "BUY":
+            # Gele le montant des la creation de l'ordre : sinon deux ordres
+            # "pending" successifs pouvaient chacun passer le test de solde
+            # ci-dessus et depasser ensemble le solde reel avant validation
+            # admin. Rembourse en cas de rejet (voir reject_transaction).
+            user.balance = money(user.balance - grand_total)
+            user.save()
     return Response({"success": True, "data": tx.as_dict()}, status=201)
 
 
@@ -458,27 +466,38 @@ def validate_transaction(request, tx_id):
         tx.processed_by = request.session_data.get("userId") or "ADMIN"
         tx.save()
 
-        user = User.objects.select_for_update().filter(id=tx.user_id).first()
-        if user:
-            if tx.type == "BUY":
-                user.balance -= tx.grand_total
-            else:
-                user.balance += tx.total
-            user.balance = max(0.0, money(user.balance))
-            user.save()
+        # BUY : deja debite/gele a la creation (create_transaction), rien a
+        # refaire ici. DEPOSIT est deja valide des la creation (jamais
+        # "pending"). SELL/DIVIDEND restent credites a la validation.
+        if tx.type != "BUY":
+            user = User.objects.select_for_update().filter(id=tx.user_id).first()
+            if user:
+                user.balance = max(0.0, money(user.balance + tx.total))
+                user.save()
     return Response({"success": True, "data": tx.as_dict()})
 
 
 @api_view(["PATCH"])
 @require_auth(admin=True)
 def reject_transaction(request, tx_id):
-    tx = Transaction.objects.filter(id=tx_id).first()
-    if not tx:
-        return Response({"error": "Transaction introuvable."}, status=404)
-    tx.status = "rejected"
-    tx.rejection_reason = request.data.get("reason") or "Rejeté par l'administrateur."
-    tx.processed_at = now_iso()
-    tx.save()
+    with db_transaction.atomic():
+        tx = Transaction.objects.select_for_update().filter(id=tx_id).first()
+        if not tx:
+            return Response({"error": "Transaction introuvable."}, status=404)
+        if tx.status != "pending":
+            return Response({"error": f'Transaction déjà "{tx.status}".'}, status=400)
+
+        tx.status = "rejected"
+        tx.rejection_reason = request.data.get("reason") or "Rejeté par l'administrateur."
+        tx.processed_at = now_iso()
+        tx.save()
+
+        if tx.type == "BUY":
+            # Rembourse le montant gele a la creation de l'ordre.
+            user = User.objects.select_for_update().filter(id=tx.user_id).first()
+            if user:
+                user.balance = money(user.balance + tx.grand_total)
+                user.save()
     return Response({"success": True, "data": tx.as_dict()})
 
 

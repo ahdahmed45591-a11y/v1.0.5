@@ -63,10 +63,21 @@ const fundingSources = [
 ];
 
 class Stock {
-  const Stock(this.ticker, this.company, this.sector, this.price, this.change);
+  const Stock(this.ticker, this.company, this.sector, this.price, this.change,
+      {this.prevClose = 0,
+      this.volume = 0,
+      this.marketCap = '',
+      this.high52 = 0,
+      this.low52 = 0,
+      this.pe = 0,
+      this.dividend = 0,
+      this.yieldPct = 0});
   final String ticker, company, sector;
   final double price; // FCFA
   final double change; // pourcentage vs cloture precedente
+  final double prevClose, high52, low52, pe, dividend, yieldPct;
+  final int volume;
+  final String marketCap;
 }
 
 /// Cache alimente par Repo.stocks() (GET /api/stocks). Vide tant qu'aucun
@@ -154,6 +165,14 @@ class Repo {
               (s['sector'] ?? '').toString(),
               (s['price'] as num?)?.toDouble() ?? 0,
               (s['change'] as num?)?.toDouble() ?? 0,
+              prevClose: (s['prevClose'] as num?)?.toDouble() ?? 0,
+              volume: (s['volume'] as num?)?.toInt() ?? 0,
+              marketCap: (s['marketCap'] ?? '').toString(),
+              high52: (s['high52'] as num?)?.toDouble() ?? 0,
+              low52: (s['low52'] as num?)?.toDouble() ?? 0,
+              pe: (s['pe'] as num?)?.toDouble() ?? 0,
+              dividend: (s['dividend'] as num?)?.toDouble() ?? 0,
+              yieldPct: (s['yield'] as num?)?.toDouble() ?? 0,
             ))
         .toList();
     return brvmStocks;

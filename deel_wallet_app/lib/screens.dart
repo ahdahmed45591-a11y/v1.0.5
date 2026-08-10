@@ -1031,6 +1031,15 @@ class BrvmTab extends StatefulWidget {
 
 class _BrvmTabState extends State<BrvmTab> {
   late Future<List<Stock>> _future = Repo.stocks();
+  String _query = '';
+
+  List<Stock> _filter(List<Stock> all) {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return all;
+    return all
+        .where((s) => s.ticker.toLowerCase().contains(q) || s.company.toLowerCase().contains(q))
+        .toList();
+  }
 
   @override
   Widget build(BuildContext context) => RefreshIndicator(
@@ -1042,6 +1051,20 @@ class _BrvmTabState extends State<BrvmTab> {
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600)),
             const Text('Bourse Régionale des Valeurs Mobilières',
                 style: TextStyle(color: Colors.black54)),
+            const SizedBox(height: 16),
+            TextField(
+              onChanged: (v) => setState(() => _query = v),
+              decoration: InputDecoration(
+                hintText: 'Rechercher une société ou un ticker',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => setState(() => _query = ''),
+                      ),
+              ),
+            ),
             const SizedBox(height: 16),
             FutureBuilder<List<Stock>>(
               future: _future,
@@ -1060,7 +1083,14 @@ class _BrvmTabState extends State<BrvmTab> {
                             snap.error is ApiException ? (snap.error as ApiException).message : 'Erreur.')),
                   );
                 }
-                return Column(children: [for (final s in snap.data!) _stockTile(context, s)]);
+                final results = _filter(snap.data!);
+                if (results.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.only(top: 40),
+                    child: Center(child: Text('Aucun résultat.')),
+                  );
+                }
+                return Column(children: [for (final s in results) _stockTile(context, s)]);
               },
             ),
           ],
@@ -1099,7 +1129,7 @@ class StockDetailScreen extends StatelessWidget {
     final up = stock.change >= 0;
     return Scaffold(
       appBar: AppBar(title: Text(stock.ticker)),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1127,11 +1157,19 @@ class StockDetailScreen extends StatelessWidget {
                     _row('Secteur', stock.sector),
                     _row('Ticker', stock.ticker),
                     _row('Marché', 'BRVM — Abidjan'),
+                    if (stock.prevClose > 0) _row('Clôture précédente', money(stock.prevClose)),
+                    if (stock.volume > 0) _row('Volume', '${stock.volume}'),
+                    if (stock.marketCap.isNotEmpty) _row('Capitalisation', stock.marketCap),
+                    if (stock.high52 > 0) _row('Plus haut (52 sem.)', money(stock.high52)),
+                    if (stock.low52 > 0) _row('Plus bas (52 sem.)', money(stock.low52)),
+                    if (stock.pe > 0) _row('PER', stock.pe.toStringAsFixed(1)),
+                    if (stock.dividend > 0) _row('Dividende', money(stock.dividend)),
+                    if (stock.yieldPct > 0) _row('Rendement', '${stock.yieldPct.toStringAsFixed(2)} %'),
                   ],
                 ),
               ),
             ),
-            const Spacer(),
+            const SizedBox(height: 16),
             FilledButton(
               onPressed: () => Navigator.push(context,
                   MaterialPageRoute(builder: (_) => BuyStockScreen(stock: stock))),

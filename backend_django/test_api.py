@@ -100,9 +100,9 @@ def main():
          {"docType": "contract", "fileName": "signature.txt", "fileBase64": "aGVsbG8="}, token=token)
     with_docs = next(u for u in call("GET", "/api/admin/users", token=admin_token)["data"]
                       if u["id"] == user["id"])
-    assert with_docs["identityDocStatus"] == "Reçu, en attente de vérification", with_docs
-    assert with_docs["proofOfAddressStatus"] == "Reçu, en attente de vérification", with_docs
-    assert with_docs["signatureStatus"].startswith("Signé électroniquement"), with_docs
+    assert with_docs["identityDocStatus"] == "Reçu - à vérifier", with_docs
+    assert with_docs["proofOfAddressStatus"] == "Reçu - à vérifier", with_docs
+    assert with_docs["signatureStatus"].startswith("Signé le"), with_docs
     assert with_docs["cniRectoUrl"] == f"/uploads/{user['id']}_cni_recto_recto.jpg"
 
     # /uploads/ protege : ni public, ni ouvert a n'importe quel jeton valide
@@ -202,7 +202,7 @@ def main():
     updated = next(u for u in call("GET", "/api/admin/users", token=admin_token)["data"]
                    if u["id"] == user["id"])
     assert updated["kyc"] == "verified" and updated["whatsapp"] == "+2250700000000"
-    assert updated["identityDocStatus"] == "Reçu, en attente de vérification", updated["identityDocStatus"]
+    assert updated["identityDocStatus"] == "Reçu - à vérifier", updated["identityDocStatus"]
     assert updated["selfieUrl"] == f"/uploads/{user['id']}_selfie_s.png", updated["selfieUrl"]
 
     # Jeton absent ou bidon

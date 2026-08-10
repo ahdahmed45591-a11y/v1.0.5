@@ -295,12 +295,15 @@ def upload_document(request):
 
     # Statuts lisibles pour l'admin (UserManagementView les affiche deja) :
     # deduits de la presence des URLs, pas d'un champ separe a maintenir.
+    # ponytail: colonnes CharField(max_length=30) en Postgres -- un texte
+    # plus long declenchait "value too long" (500) a l'ecriture, invisible
+    # sur SQLite en local qui n'impose pas la limite. Rester <30 caracteres.
     if user.cni_recto_url and user.cni_verso_url:
-        user.identity_doc_status = "Reçu, en attente de vérification"
+        user.identity_doc_status = "Reçu - à vérifier"
     if user.proof_address_url:
-        user.proof_of_address_status = "Reçu, en attente de vérification"
+        user.proof_of_address_status = "Reçu - à vérifier"
     if user.contract_url:
-        user.signature_status = f"Signé électroniquement le {now_iso()[:10]}"
+        user.signature_status = f"Signé le {now_iso()[:10]}"
     # Un dossier rejete qui reenvoie une piece redevient "pending" : sinon
     # le client reste verrouille sans jamais repasser devant l'admin.
     if user.kyc == "suspended":

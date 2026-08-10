@@ -1,6 +1,4 @@
-from django.conf import settings
 from django.urls import path, re_path
-from django.views.static import serve
 
 from . import views
 
@@ -34,10 +32,6 @@ urlpatterns = [
     path("api/admin/support/<str:ticket_id>/status", views.admin_ticket_status),
     path("api/admin/chat/<str:user_id>", views.admin_chat),
 
-    # ponytail: /uploads/ sert les pieces KYC (CNI, selfie...) sans auth --
-    # deja le comportement pre-existant (l'admin React les affiche en <img
-    # src> direct). URL non devinable en pratique (nom = userId + docType +
-    # nom de fichier) mais pas un vrai controle d'acces ; passer par une vue
-    # authentifiee si des documents sensibles doivent etre proteges.
-    re_path(r"^uploads/(?P<path>.*)$", serve, {"document_root": settings.UPLOAD_DIR}),
+    # Pieces KYC : proprietaire ou admin seulement (voir views.uploads).
+    re_path(r"^uploads/(?P<path>.*)$", views.uploads),
 ]

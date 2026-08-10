@@ -15,6 +15,8 @@ import bcrypt
 import jwt
 from django.conf import settings
 from django.db import transaction as db_transaction
+from django.http import HttpResponse
+from django.views.static import serve as static_serve
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
@@ -56,10 +58,13 @@ def money(x):
 
 def session_of(request):
     header = request.headers.get("Authorization", "")
-    if not header.startswith("Bearer "):
+    # ?token= en secours : /uploads/... (voir plus bas) est charge via
+    # <img src>, qui ne peut pas poser d'en-tete Authorization.
+    token = header[7:] if header.startswith("Bearer ") else request.GET.get("token")
+    if not token:
         return None
     try:
-        return jwt.decode(header[7:], JWT_SECRET, algorithms=["HS256"])
+        return jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
     except jwt.PyJWTError:
         return None
 
@@ -208,6 +213,20 @@ def profile(request):
             setattr(user, field, d[src])
     user.save()
     return Response({"success": True, "user": user.as_dict()})
+
+
+def uploads(request, path):
+    """Sert les pieces KYC (CNI, selfie, justificatif...). Route protegee :
+    seul le proprietaire (prefixe userId du nom de fichier, voir
+    upload_document) ou un admin peut lire. Avant ce correctif /uploads/
+    etait public, sans aucune authentification."""
+    sess = session_of(request)
+    if sess is None:
+        return HttpResponse(status=401)
+    owner_id = path.split("_", 1)[0]
+    if sess.get("role") != "admin" and sess.get("userId") != owner_id:
+        return HttpResponse(status=403)
+    return static_serve(request, path, document_root=UPLOAD_DIR)
 
 
 CONTRACT_PATH = os.path.join(os.path.dirname(__file__), "contract_sgi_brvm.txt")

@@ -36,6 +36,17 @@ def call(method, path, body=None, token=None, expect=200):
     return payload
 
 
+def raw_status(path, token=None):
+    """GET brut (reponse fichier, pas JSON) -- pour /uploads/..."""
+    req = urllib.request.Request(
+        BASE + path, headers=({"Authorization": f"Bearer {token}"} if token else {}))
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
 def main():
     call("GET", "/health")
 
@@ -93,6 +104,12 @@ def main():
     assert with_docs["proofOfAddressStatus"] == "Reçu, en attente de vérification", with_docs
     assert with_docs["signatureStatus"].startswith("Signé électroniquement"), with_docs
     assert with_docs["cniRectoUrl"] == f"/uploads/{user['id']}_cni_recto_recto.jpg"
+
+    # /uploads/ protege : ni public, ni ouvert a n'importe quel jeton valide
+    doc_path = with_docs["cniRectoUrl"]
+    assert raw_status(doc_path) == 401, "document KYC lisible sans authentification !"
+    assert raw_status(doc_path, token=token) == 200
+    assert raw_status(doc_path, token=admin_token) == 200
 
     # Admin verifie le dossier -> deverrouillage
     verified = call("PATCH", f"/api/admin/users/{user['id']}/kyc", {"status": "verified"}, token=admin_token)["data"]

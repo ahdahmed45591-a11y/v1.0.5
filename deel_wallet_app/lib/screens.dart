@@ -1,6 +1,9 @@
 import 'dart:convert';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -1716,20 +1719,22 @@ class ContractScreen extends StatefulWidget {
 
 class _ContractScreenState extends State<ContractScreen> {
   late Future<String> _future = Repo.contractText();
-  final _signature = TextEditingController();
+  final _padKey = GlobalKey<_SignaturePadState>();
   bool _accepted = false;
+  bool _hasStroke = false;
   bool _busy = false;
 
   Future<void> _sign() async {
-    final name = _signature.text.trim();
-    if (name.isEmpty || !_accepted) return;
+    if (!_accepted || !_hasStroke) return;
     setState(() => _busy = true);
     try {
-      final receipt = 'SIGNATURE ELECTRONIQUE\nContrat SGI BRVM\n'
-          'Signé par : $name\nDate : ${DateTime.now().toIso8601String()}\n'
-          "J'ai lu et j'accepte les termes du contrat.";
-      await Repo.uploadDocument('contract', 'signature_${DateTime.now().millisecondsSinceEpoch}.txt',
-          base64Encode(utf8.encode(receipt)));
+      final png = await _padKey.currentState?.capture();
+      if (png == null) {
+        setState(() => _hasStroke = false); // pad vide malgre le flag : on revalide
+        return;
+      }
+      await Repo.uploadDocument(
+          'contract', 'signature_${DateTime.now().millisecondsSinceEpoch}.png', base64Encode(png));
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Contrat signé. Dossier envoyé pour validation.')));
@@ -1782,17 +1787,24 @@ class _ContractScreenState extends State<ContractScreen> {
                         controlAffinity: ListTileControlAffinity.leading,
                         title: const Text("J'ai lu et j'accepte les termes du contrat SGI BRVM."),
                       ),
-                      TextField(
-                        controller: _signature,
-                        decoration: const InputDecoration(
-                            labelText: 'Tapez votre nom complet pour signer',
-                            hintText: 'Signature électronique'),
-                        onChanged: (_) => setState(() {}),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Signez ci-dessous avec le doigt',
+                              style: TextStyle(fontWeight: FontWeight.w600)),
+                          TextButton(
+                            onPressed: () {
+                              _padKey.currentState?.clear();
+                              setState(() => _hasStroke = false);
+                            },
+                            child: const Text('Effacer'),
+                          ),
+                        ],
                       ),
+                      SignaturePad(key: _padKey, onChanged: (v) => setState(() => _hasStroke = v)),
                       const SizedBox(height: 12),
                       FilledButton(
-                        onPressed:
-                            (_accepted && _signature.text.trim().isNotEmpty && !_busy) ? _sign : null,
+                        onPressed: (_accepted && _hasStroke && !_busy) ? _sign : null,
                         child: _busy
                             ? const SizedBox(
                                 height: 20,
@@ -1808,4 +1820,76 @@ class _ContractScreenState extends State<ContractScreen> {
           },
         ),
       );
+}
+
+/// Pad de signature manuscrite : capture les traits au doigt et les rend en
+/// PNG (RepaintBoundary.toImage). Natif Flutter (CustomPainter), pas de
+/// dependance signature/canvas externe pour un besoin aussi simple.
+class SignaturePad extends StatefulWidget {
+  const SignaturePad({super.key, required this.onChanged});
+  final ValueChanged<bool> onChanged;
+  @override
+  State<SignaturePad> createState() => _SignaturePadState();
+}
+
+class _SignaturePadState extends State<SignaturePad> {
+  final _boundaryKey = GlobalKey();
+  final List<Offset?> _points = [];
+
+  void _addPoint(Offset? p) {
+    setState(() => _points.add(p));
+    widget.onChanged(_points.any((p) => p != null));
+  }
+
+  void clear() {
+    setState(() => _points.clear());
+  }
+
+  Future<Uint8List?> capture() async {
+    if (_points.every((p) => p == null)) return null;
+    final boundary = _boundaryKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+    if (boundary == null) return null;
+    final image = await boundary.toImage(pixelRatio: 2);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    return bytes?.buffer.asUint8List();
+  }
+
+  @override
+  Widget build(BuildContext context) => RepaintBoundary(
+        key: _boundaryKey,
+        child: Container(
+          height: 160,
+          width: double.infinity,
+          decoration: BoxDecoration(
+              border: Border.all(color: Colors.black26),
+              borderRadius: BorderRadius.circular(8),
+              color: Colors.white),
+          child: GestureDetector(
+            onPanStart: (d) => _addPoint(d.localPosition),
+            onPanUpdate: (d) => _addPoint(d.localPosition),
+            onPanEnd: (_) => _addPoint(null),
+            child: CustomPaint(painter: _SignaturePainter(_points), size: Size.infinite),
+          ),
+        ),
+      );
+}
+
+class _SignaturePainter extends CustomPainter {
+  _SignaturePainter(this.points);
+  final List<Offset?> points;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.black87
+      ..strokeWidth = 2.4
+      ..strokeCap = StrokeCap.round;
+    for (var i = 0; i < points.length - 1; i++) {
+      final p1 = points[i], p2 = points[i + 1];
+      if (p1 != null && p2 != null) canvas.drawLine(p1, p2, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SignaturePainter old) => old.points != points;
 }

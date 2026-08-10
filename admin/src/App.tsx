@@ -28,13 +28,16 @@ const DEFAULT_AVATAR = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/20
 const BACKEND_BASE = API_BASE.replace(/\/api\/?$/, '');
 
 // ── Data mappers ──────────────────────────────────────────────────────────────
-function buildDocUrl(relUrl: string | undefined): string | undefined {
+// /uploads/... exige desormais une authentification (voir views.uploads
+// cote Django) : un <img src> ne pose pas d'en-tete, le jeton passe donc en
+// query (?token=), accepte en secours par session_of().
+function buildDocUrl(relUrl: string | undefined, token: string): string | undefined {
   if (!relUrl) return undefined;
-  if (relUrl.startsWith('http')) return relUrl;
-  return `${BACKEND_BASE}${relUrl}`;
+  const abs = relUrl.startsWith('http') ? relUrl : `${BACKEND_BASE}${relUrl}`;
+  return `${abs}?token=${encodeURIComponent(token)}`;
 }
 
-function mapUser(u: any): User {
+function mapUser(u: any, token: string): User {
   const kyc = (u.kyc || '').toLowerCase();
   return {
     id: u.id,
@@ -62,11 +65,11 @@ function mapUser(u: any): User {
     identityDocStatus: u.identityDocStatus || 'Non fourni',
     proofOfAddressStatus: u.proofOfAddressStatus || 'Non fourni',
     signatureStatus: u.signatureStatus || 'Non signé',
-    cniRectoUrl: buildDocUrl(u.cniRectoUrl),
-    cniVersoUrl: buildDocUrl(u.cniVersoUrl),
-    selfieUrl: buildDocUrl(u.selfieUrl),
-    proofAddressUrl: buildDocUrl(u.proofAddressUrl),
-    contractUrl: buildDocUrl(u.contractUrl),
+    cniRectoUrl: buildDocUrl(u.cniRectoUrl, token),
+    cniVersoUrl: buildDocUrl(u.cniVersoUrl, token),
+    selfieUrl: buildDocUrl(u.selfieUrl, token),
+    proofAddressUrl: buildDocUrl(u.proofAddressUrl, token),
+    contractUrl: buildDocUrl(u.contractUrl, token),
   };
 }
 
@@ -196,7 +199,7 @@ export default function App() {
       if (usersRes.status === 'fulfilled' && usersRes.value.ok) {
         const json = await usersRes.value.json();
         if (json.success && Array.isArray(json.data)) {
-          setUsers(json.data.map(mapUser));
+          setUsers(json.data.map((u: any) => mapUser(u, adminToken)));
         }
       }
 

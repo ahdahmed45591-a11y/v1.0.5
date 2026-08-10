@@ -1589,6 +1589,7 @@ class _KycFormScreenState extends State<KycFormScreen> {
     'proof_address': null,
   };
   bool _busy = false;
+  final Set<String> _picking = {}; // slots avec une capture en cours
 
   bool _already(String docType) => switch (docType) {
         'selfie' => app.selfieUrl != null,
@@ -1598,11 +1599,28 @@ class _KycFormScreenState extends State<KycFormScreen> {
         _ => false,
       };
 
+  /// Reprendre une photo (mauvaise photo, refaire) : ouvre a nouveau la
+  /// camera pour ce slot, quel que soit son etat actuel (deja envoyee ou
+  /// juste prise). ponytail: sans le garde _picking, un double-tap pouvait
+  /// declencher deux pickImage() concurrents -> PlatformException
+  /// "already_active" côté image_picker, jamais affichee (try/catch absent)
+  /// -> le bouton semblait ne rien faire.
   Future<void> _pick(String docType) async {
-    final photo =
-        await _picker.pickImage(source: ImageSource.camera, imageQuality: 70, maxWidth: 1600);
-    if (photo == null) return;
-    setState(() => _photos[docType] = photo);
+    if (_picking.contains(docType)) return;
+    setState(() => _picking.add(docType));
+    try {
+      final photo =
+          await _picker.pickImage(source: ImageSource.camera, imageQuality: 70, maxWidth: 1600);
+      if (photo == null) return; // photo annulee cote camera, pas une erreur
+      setState(() => _photos[docType] = photo);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("Impossible d'ouvrir la caméra. Réessayez.")));
+      }
+    } finally {
+      if (mounted) setState(() => _picking.remove(docType));
+    }
   }
 
   bool get _canSubmit =>
@@ -1646,7 +1664,11 @@ class _KycFormScreenState extends State<KycFormScreen> {
         title: Text(_kycDocLabels[docType]!),
         subtitle: Text(file != null ? file.name : (done ? 'Déjà envoyé' : 'Non fourni')),
         trailing: TextButton(
-            onPressed: () => _pick(docType), child: Text(done ? 'Reprendre' : 'Prendre la photo')),
+            onPressed: _picking.contains(docType) ? null : () => _pick(docType),
+            child: _picking.contains(docType)
+                ? const SizedBox(
+                    height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                : Text(done ? 'Reprendre' : 'Prendre la photo')),
       ),
     );
   }

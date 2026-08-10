@@ -245,6 +245,60 @@ def contract(request):
     return Response({"success": True, "text": text})
 
 
+def contract_pdf(request):
+    """PDF du contrat SGI BRVM + image de la signature du client en bas de
+    page. Genere a la demande (pas stocke) : le client peut le telecharger
+    depuis son Profil, l'admin depuis le dossier d'un client (?userId=)."""
+    sess = session_of(request)
+    if sess is None:
+        return HttpResponse(status=401)
+    target_id = request.GET.get("userId") or sess.get("userId")
+    if sess.get("role") != "admin" and sess.get("userId") != target_id:
+        return HttpResponse(status=403)
+    user = User.objects.filter(id=target_id).first()
+    if not user:
+        return HttpResponse(status=404)
+    if not user.contract_url:
+        return HttpResponse("Contrat pas encore signe par ce client.", status=404)
+
+    from fpdf import FPDF
+
+    try:
+        with open(CONTRACT_PATH, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        text = "Contrat indisponible pour le moment."
+
+    pdf = FPDF(format="A4", unit="mm")
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.multi_cell(0, 8, "CONTRAT D'OUVERTURE DE COMPTE TITRES - SGI BRVM", align="C")
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.multi_cell(0, 5.5, text)
+    pdf.ln(8)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(0, 6, f"Client : {user.name} ({user.email})", ln=True)
+    if user.whatsapp:
+        pdf.cell(0, 6, f"WhatsApp : {user.whatsapp}", ln=True)
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(0, 6, "Signature electronique :", ln=True)
+    sig_path = os.path.join(UPLOAD_DIR, os.path.basename(user.contract_url))
+    if os.path.exists(sig_path):
+        try:
+            pdf.image(sig_path, w=60)
+        except Exception:  # noqa: BLE001 - fichier non-image (ancien format .txt) : on l'omet, pas de 500
+            pass
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.cell(0, 6, user.signature_status or "Signe electroniquement.", ln=True)
+
+    resp = HttpResponse(bytes(pdf.output()), content_type="application/pdf")
+    resp["Content-Disposition"] = f'attachment; filename="contrat_sgi_brvm_{user.id}.pdf"'
+    return resp
+
+
 DOC_FIELDS = {
     "cni_recto": "cni_recto_url",
     "cniRecto": "cni_recto_url",

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'api.dart';
 import 'data.dart';
@@ -446,6 +447,22 @@ void _infoDialog(BuildContext context, String title, String body) {
       ],
     ),
   );
+}
+
+/// Numero WhatsApp de l'administrateur SGI (support client).
+const adminWhatsapp = '0555173322';
+
+/// Ouvre WhatsApp sur une conversation avec [phone] (format local 0XXXXXXXXX,
+/// converti en indicatif +225). Affiche un message d'erreur si aucune app
+/// WhatsApp/navigateur ne peut ouvrir le lien (device sans WhatsApp installe).
+Future<void> openWhatsApp(BuildContext context, String phone, {String message = ''}) async {
+  final clean = '225${phone.replaceAll(RegExp(r'[^0-9]'), '').replaceFirst(RegExp(r'^0'), '')}';
+  final uri = Uri.parse('https://wa.me/$clean${message.isEmpty ? '' : '?text=${Uri.encodeComponent(message)}'}');
+  final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!ok && context.mounted) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text("Impossible d'ouvrir WhatsApp.")));
+  }
 }
 
 // ---------------------------------------------------------------------- home
@@ -1042,6 +1059,26 @@ class BrvmTab extends StatefulWidget {
   State<BrvmTab> createState() => _BrvmTabState();
 }
 
+/// Seance BRVM : lun-ven, 9h00-15h00 GMT (source : data/brvm_data, mis a
+/// jour toutes les 15 min sur ce creneau). Abidjan est en UTC+0 toute
+/// l'annee, DateTime.now().toUtc() donne donc directement l'heure locale.
+class _MarketStatus {
+  const _MarketStatus(this.open, this.label);
+  final bool open;
+  final String label;
+}
+
+_MarketStatus _brvmMarketStatus() {
+  final now = DateTime.now().toUtc();
+  final isWeekday = now.weekday <= DateTime.friday;
+  final minutesNow = now.hour * 60 + now.minute;
+  final isOpen = isWeekday && minutesNow >= 9 * 60 && minutesNow < 15 * 60;
+  return _MarketStatus(
+    isOpen,
+    isOpen ? 'Marché ouvert — ferme à 15h00 (GMT)' : 'Marché fermé — 9h-15h GMT, lun-ven',
+  );
+}
+
 class _BrvmTabState extends State<BrvmTab> {
   late Future<List<Stock>> _future = Repo.stocks();
   String _query = '';
@@ -1064,6 +1101,17 @@ class _BrvmTabState extends State<BrvmTab> {
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600)),
             const Text('Bourse Régionale des Valeurs Mobilières',
                 style: TextStyle(color: Colors.black54)),
+            const SizedBox(height: 8),
+            Builder(builder: (context) {
+              final status = _brvmMarketStatus();
+              return Chip(
+                avatar: Icon(Icons.circle,
+                    size: 10, color: status.open ? brandGreen : Colors.black45),
+                label: Text(status.label, style: const TextStyle(fontSize: 12)),
+                backgroundColor: (status.open ? brandGreen : Colors.black45).withValues(alpha: .08),
+                side: BorderSide.none,
+              );
+            }),
             const SizedBox(height: 16),
             TextField(
               onChanged: (v) => setState(() => _query = v),
@@ -1379,10 +1427,8 @@ class ProfileTab extends StatelessWidget {
                     Text(app.userEmail, style: const TextStyle(color: Colors.black54)),
                   const SizedBox(height: 8),
                   GestureDetector(
-                    onTap: () => app.kycVerified
-                        ? _infoDialog(context, 'Vérification KYC', 'Votre compte est vérifié.')
-                        : Navigator.push(
-                            context, MaterialPageRoute(builder: (_) => const KycFormScreen())),
+                    onTap: () => Navigator.push(
+                        context, MaterialPageRoute(builder: (_) => const KycSummaryScreen())),
                     child: Chip(
                       label: Text(app.kycVerified
                           ? 'Compte vérifié'
@@ -1424,15 +1470,17 @@ class ProfileTab extends StatelessWidget {
                     title: const Text('Documents & KYC'),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => Navigator.push(
-                        context, MaterialPageRoute(builder: (_) => const KycFormScreen())),
+                        context, MaterialPageRoute(builder: (_) => const KycSummaryScreen())),
                   ),
                   const Divider(height: 1),
                   ListTile(
                     leading: const Icon(Icons.help_outline),
                     title: const Text('Aide & Support'),
+                    subtitle: const Text('WhatsApp : $adminWhatsapp'),
                     trailing: const Icon(Icons.chevron_right),
-                    onTap: () => _infoDialog(
-                        context, 'Aide & Support', 'support@baoufinance.ci\n+225 07 00 00 00 00'),
+                    onTap: () => openWhatsApp(context, adminWhatsapp,
+                        message: 'Bonjour, j\'ai besoin d\'aide sur mon compte BAOU Finance '
+                            '(${app.userEmail}).'),
                   ),
                   const Divider(height: 1),
                   ListTile(
@@ -1562,6 +1610,85 @@ class KycBanner extends StatelessWidget {
             ),
           );
         },
+      );
+}
+
+/// Vue depuis Profil : lecture seule, telechargement uniquement. Corriger
+/// une piece se fait via le bandeau KycBanner (KycFormScreen) tant que le
+/// dossier n'est pas valide -- pas depuis cet ecran.
+class KycSummaryScreen extends StatelessWidget {
+  const KycSummaryScreen({super.key});
+
+  Future<void> _open(BuildContext context, String relPath) async {
+    final uri = Uri.parse(
+        '${Api.baseUrl}$relPath${relPath.contains('?') ? '&' : '?'}token=${Uri.encodeComponent(Api.token ?? '')}');
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text("Impossible d'ouvrir le document.")));
+    }
+  }
+
+  Widget _row(BuildContext context, String label, String? url) => Card(
+        child: ListTile(
+          leading: Icon(url != null ? Icons.check_circle : Icons.remove_circle_outline,
+              color: url != null ? Colors.green : Colors.black38),
+          title: Text(label),
+          subtitle: Text(url != null ? 'Reçu' : 'Non fourni'),
+          trailing: url == null
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.download_outlined),
+                  onPressed: () => _open(context, url)),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Documents & KYC')),
+        body: ListenableBuilder(
+          listenable: app,
+          builder: (context, _) => ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Chip(
+                label: Text(app.kycVerified
+                    ? 'Compte vérifié'
+                    : app.kyc == 'suspended'
+                        ? 'Compte suspendu'
+                        : 'En attente de vérification'),
+                backgroundColor:
+                    (app.kycVerified ? Colors.green : brandOrange).withValues(alpha: .12),
+                labelStyle: TextStyle(color: app.kycVerified ? Colors.green[800] : brandOrange),
+                side: BorderSide.none,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                  "Lecture seule. Pour corriger une pièce, utilisez le bandeau en haut de "
+                  "l'application tant que le dossier n'est pas validé.",
+                  style: TextStyle(color: Colors.black54, fontSize: 12)),
+              const SizedBox(height: 16),
+              _row(context, 'Photo du visage', app.selfieUrl),
+              _row(context, "Pièce d'identité — RECTO", app.cniRectoUrl),
+              _row(context, "Pièce d'identité — VERSO", app.cniVersoUrl),
+              _row(context, 'Justificatif de domicile', app.proofAddressUrl),
+              const SizedBox(height: 8),
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.description_outlined),
+                  title: const Text('Contrat SGI BRVM'),
+                  subtitle: Text(app.contractSigned ? 'Signé' : 'Non signé'),
+                  trailing: app.contractSigned
+                      ? IconButton(
+                          icon: const Icon(Icons.picture_as_pdf_outlined),
+                          onPressed: () => _open(context, '/api/contract/pdf'),
+                        )
+                      : null,
+                ),
+              ),
+            ],
+          ),
+        ),
       );
 }
 
@@ -1886,11 +2013,17 @@ class _SignaturePadState extends State<SignaturePad> {
               border: Border.all(color: Colors.black26),
               borderRadius: BorderRadius.circular(8),
               color: Colors.white),
-          child: GestureDetector(
-            onPanStart: (d) => _addPoint(d.localPosition),
-            onPanUpdate: (d) => _addPoint(d.localPosition),
-            onPanEnd: (_) => _addPoint(null),
-            child: CustomPaint(painter: _SignaturePainter(_points), size: Size.infinite),
+          // ClipRRect : le trait ne doit jamais deborder du cadre arrondi,
+          // sinon la capture (boundary.toImage) inclut des pixels hors zone.
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque, // capte le geste meme sur zone non peinte
+              onPanStart: (d) => _addPoint(d.localPosition),
+              onPanUpdate: (d) => _addPoint(d.localPosition),
+              onPanEnd: (_) => _addPoint(null),
+              child: SizedBox.expand(child: CustomPaint(painter: _SignaturePainter(_points))),
+            ),
           ),
         ),
       );
@@ -1902,10 +2035,15 @@ class _SignaturePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // ponytail: noir opaque + trait plus epais -- Colors.black87 (87%
+    // d'opacite) + strokeWidth 2.4 pouvait paraitre invisible sur certains
+    // ecrans/backends de rendu. Colors.black (100%) + 3.5 est net partout.
     final paint = Paint()
-      ..color = Colors.black87
-      ..strokeWidth = 2.4
-      ..strokeCap = StrokeCap.round;
+      ..color = Colors.black
+      ..strokeWidth = 3.5
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke
+      ..isAntiAlias = true;
     for (var i = 0; i < points.length - 1; i++) {
       final p1 = points[i], p2 = points[i + 1];
       if (p1 != null && p2 != null) canvas.drawLine(p1, p2, paint);

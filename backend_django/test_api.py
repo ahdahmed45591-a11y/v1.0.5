@@ -36,15 +36,19 @@ def call(method, path, body=None, token=None, expect=200):
     return payload
 
 
-def raw_status(path, token=None):
-    """GET brut (reponse fichier, pas JSON) -- pour /uploads/..."""
+def raw_get(path, token=None):
+    """GET brut (reponse fichier, pas JSON) -- pour /uploads/... et le PDF."""
     req = urllib.request.Request(
         BASE + path, headers=({"Authorization": f"Bearer {token}"} if token else {}))
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
-            return r.status
+            return r.status, r.read()
     except urllib.error.HTTPError as e:
-        return e.code
+        return e.code, e.read()
+
+
+def raw_status(path, token=None):
+    return raw_get(path, token=token)[0]
 
 
 def main():
@@ -104,6 +108,13 @@ def main():
     assert with_docs["proofOfAddressStatus"] == "Reçu - à vérifier", with_docs
     assert with_docs["signatureStatus"].startswith("Signé le"), with_docs
     assert with_docs["cniRectoUrl"] == f"/uploads/{user['id']}_cni_recto_recto.jpg"
+
+    # PDF du contrat : genere a la demande, telechargeable par le client et par l'admin
+    status, body = raw_get("/api/contract/pdf", token=token)
+    assert status == 200 and body[:4] == b"%PDF", (status, body[:20])
+    status, body = raw_get(f"/api/contract/pdf?userId={user['id']}", token=admin_token)
+    assert status == 200 and body[:4] == b"%PDF", (status, body[:20])
+    assert raw_status("/api/contract/pdf") == 401  # pas de jeton
 
     # /uploads/ protege : ni public, ni ouvert a n'importe quel jeton valide
     doc_path = with_docs["cniRectoUrl"]

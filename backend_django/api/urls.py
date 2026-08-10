@@ -13,6 +13,7 @@ urlpatterns = [
     path("api/auth/update-profile", views.profile),
     path("api/auth/upload-document", views.upload_document),
     path("api/contract", views.contract),
+    path("api/contract/pdf", views.contract_pdf),
     path("api/auth/chat", views.my_chat),
     path("api/auth/support", views.support),
 

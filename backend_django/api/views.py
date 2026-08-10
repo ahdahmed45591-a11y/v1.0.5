@@ -263,11 +263,21 @@ def contract_pdf(request):
 
     from fpdf import FPDF
 
+    def latin1_safe(s):
+        # ponytail: la police core "Helvetica" de fpdf2 n'accepte que le
+        # latin-1 strict -- un tiret cadratin "—" (present dans le .txt du
+        # contrat, et que l'admin peut retaper en l'editant) plante tout le
+        # rendu (FPDFUnicodeEncodingException, jamais latin-1). On degrade
+        # proprement au lieu de planter ; passer a une police unicode
+        # (DejaVu, .add_font) si des caracteres non-latins deviennent requis.
+        return (s or "").encode("latin-1", errors="replace").decode("latin-1")
+
     try:
         with open(CONTRACT_PATH, encoding="utf-8") as fh:
             text = fh.read()
     except OSError:
         text = "Contrat indisponible pour le moment."
+    text = latin1_safe(text)
 
     pdf = FPDF(format="A4", unit="mm")
     pdf.set_auto_page_break(auto=True, margin=15)
@@ -279,9 +289,9 @@ def contract_pdf(request):
     pdf.multi_cell(0, 5.5, text)
     pdf.ln(8)
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(0, 6, f"Client : {user.name} ({user.email})", ln=True)
+    pdf.cell(0, 6, latin1_safe(f"Client : {user.name} ({user.email})"), ln=True)
     if user.whatsapp:
-        pdf.cell(0, 6, f"WhatsApp : {user.whatsapp}", ln=True)
+        pdf.cell(0, 6, latin1_safe(f"WhatsApp : {user.whatsapp}"), ln=True)
     pdf.ln(4)
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(0, 6, "Signature electronique :", ln=True)
@@ -292,7 +302,7 @@ def contract_pdf(request):
         except Exception:  # noqa: BLE001 - fichier non-image (ancien format .txt) : on l'omet, pas de 500
             pass
     pdf.set_font("Helvetica", "I", 8)
-    pdf.cell(0, 6, user.signature_status or "Signe electroniquement.", ln=True)
+    pdf.cell(0, 6, latin1_safe(user.signature_status) or "Signe electroniquement.", ln=True)
 
     resp = HttpResponse(bytes(pdf.output()), content_type="application/pdf")
     resp["Content-Disposition"] = f'attachment; filename="contrat_sgi_brvm_{user.id}.pdf"'

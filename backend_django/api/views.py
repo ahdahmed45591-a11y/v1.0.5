@@ -8,19 +8,22 @@ import base64
 import binascii
 import datetime as dt
 import functools
+import json
 import os
 import uuid
 
 import bcrypt
 import jwt
 from django.conf import settings
+from django.core.mail import send_mail
 from django.db import transaction as db_transaction
-from django.http import HttpResponse
+from django.db.models import Sum
+from django.http import HttpResponse, HttpResponseRedirect
 from django.views.static import serve as static_serve
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from . import brvm
+from . import brvm, jeko
 from .models import Message, Ticket, Transaction, User
 
 JWT_SECRET = settings.JWT_SECRET
@@ -156,6 +159,111 @@ def login(request):
     return Response({"success": True, "token": token, "user": user.as_dict()})
 
 
+def send_welcome_email(user):
+    """Email de bienvenue avec lien de confirmation, envoye depuis le compte
+    support (EMAIL_HOST_USER). ponytail: si EMAIL_HOST_PASSWORD n'est pas
+    configure (mot de passe d'application Gmail), on n'essaie meme pas
+    d'ouvrir la connexion SMTP -- une inscription ne doit jamais echouer a
+    cause de l'email."""
+    if not settings.EMAIL_HOST_PASSWORD:
+        return
+    verify_token = jwt.encode(
+        {
+            "userId": user.id,
+            "purpose": "verify_email",
+            "exp": dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=7),
+        },
+        JWT_SECRET,
+        algorithm="HS256",
+    )
+    link = f"{settings.BACKEND_PUBLIC_URL}/api/auth/verify-email?token={verify_token}"
+    try:
+        send_mail(
+            subject="Bienvenue sur BAOU Finance — confirmez votre compte",
+            message=(
+                f"Bonjour {user.name},\n\n"
+                "Votre compte BAOU Finance a bien ete cree.\n"
+                f"Confirmez votre adresse email en ouvrant ce lien depuis votre telephone :\n{link}\n\n"
+                "Le lien ouvre directement l'application BAOU si elle est installee.\n\n"
+                "L'equipe BAOU Finance"
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+    except Exception:  # noqa: BLE001 - SMTP down/creds invalides : ne bloque pas l'inscription
+        pass
+
+
+def send_password_reset_email(user):
+    """Meme mecanique que send_welcome_email, mais le token sert de *code* a
+    copier-coller dans l'appli plutot qu'un lien a suivre : pas de parsing de
+    deep link cote Flutter a construire pour ce flux (voir verify_email pour
+    le cas ou un simple "ouvrir l'app" suffit)."""
+    if not settings.EMAIL_HOST_PASSWORD:
+        return
+    token = jwt.encode(
+        {
+            "userId": user.id,
+            "purpose": "reset_password",
+            "exp": dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1),
+        },
+        JWT_SECRET,
+        algorithm="HS256",
+    )
+    try:
+        send_mail(
+            subject="BAOU Finance — Réinitialisation de votre mot de passe",
+            message=(
+                f"Bonjour {user.name},\n\n"
+                "Voici votre code de reinitialisation (valable 1 heure) :\n\n"
+                f"{token}\n\n"
+                "Ouvrez l'application BAOU, allez sur \"Mot de passe oublie\", "
+                "puis collez ce code avec votre nouveau mot de passe.\n\n"
+                "Si vous n'etes pas a l'origine de cette demande, ignorez cet email.\n\n"
+                "L'equipe BAOU Finance"
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+    except Exception:  # noqa: BLE001 - SMTP down/creds invalides : ne bloque jamais l'appel
+        pass
+
+
+@api_view(["POST"])
+def request_password_reset(request):
+    email = (request.data.get("email") or "").strip().lower()
+    user = User.objects.filter(email__iexact=email).first()
+    if user:
+        send_password_reset_email(user)
+    # Meme reponse que le compte existe ou non : evite l'enumeration d'emails.
+    return Response({
+        "success": True,
+        "message": "Si un compte existe avec cet email, un code de réinitialisation a été envoyé.",
+    })
+
+
+@api_view(["POST"])
+def reset_password(request):
+    token = request.data.get("token") or ""
+    new_password = request.data.get("newPassword") or ""
+    if len(new_password) < 6:
+        return Response({"error": "Le mot de passe doit contenir au moins 6 caractères."}, status=400)
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+    except jwt.PyJWTError:
+        return Response({"error": "Code invalide ou expiré."}, status=400)
+    if payload.get("purpose") != "reset_password":
+        return Response({"error": "Code invalide."}, status=400)
+    user = User.objects.filter(id=payload.get("userId")).first()
+    if not user:
+        return Response({"error": "Compte introuvable."}, status=404)
+    user.password = hash_password(new_password)
+    user.save()
+    return Response({"success": True, "message": "Mot de passe mis à jour."})
+
+
 @api_view(["POST"])
 def register(request):
     d = request.data
@@ -178,7 +286,28 @@ def register(request):
         balance=0.0,
         joined_at=now_iso(),
     )
+    send_welcome_email(user)
     return Response({"success": True, "user": user.as_dict()}, status=201)
+
+
+def verify_email(request):
+    """Lien clique depuis l'email de bienvenue : marque l'email verifie puis
+    redirige vers l'app mobile (scheme baou://, voir AndroidManifest.xml).
+    Pas de @api_view : ce n'est jamais appele en JSON, toujours ouvert dans
+    un navigateur/webview depuis l'email."""
+    token = request.GET.get("token") or ""
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+    except jwt.PyJWTError:
+        return HttpResponseRedirect("baou://verify-email?ok=0")
+    if payload.get("purpose") != "verify_email":
+        return HttpResponseRedirect("baou://verify-email?ok=0")
+    user = User.objects.filter(id=payload.get("userId")).first()
+    if not user:
+        return HttpResponseRedirect("baou://verify-email?ok=0")
+    user.email_verified = True
+    user.save()
+    return HttpResponseRedirect("baou://verify-email?ok=1")
 
 
 @api_view(["POST"])
@@ -478,6 +607,20 @@ def transactions_all(request):
     return Response({"success": True, "count": len(rows), "data": rows})
 
 
+def _owned_quantity(user, ticker):
+    """Titres reellement disponibles a la vente : achats valides moins ventes
+    deja validees ou en attente (meme logique que le gel de solde a l'achat,
+    cf. create_transaction/BUY : empeche de vendre deux fois les memes titres
+    via deux ordres "pending" simultanes)."""
+    bought = Transaction.objects.filter(
+        user=user, ticker=ticker, type="BUY", status="validated"
+    ).aggregate(s=Sum("quantity"))["s"] or 0
+    reserved = Transaction.objects.filter(
+        user=user, ticker=ticker, type="SELL", status__in=("validated", "pending")
+    ).aggregate(s=Sum("quantity"))["s"] or 0
+    return bought - reserved
+
+
 def create_transaction(request, sess):
     d = request.data
     kind = (d.get("type") or "BUY").upper()
@@ -489,29 +632,36 @@ def create_transaction(request, sess):
     if qty <= 0 or price < 0:
         return Response({"error": "Quantité et prix doivent être positifs."}, status=400)
 
-    # select_for_update : deux depots simultanes ne doivent pas ecraser
-    # le meme solde (le store Node en memoire avait ce trou).
-    with db_transaction.atomic():
-        user = User.objects.select_for_update().filter(id=sess["userId"]).first()
-        if not user:
-            return Response({"error": "Utilisateur introuvable."}, status=404)
-        if user.kyc != "verified":
-            return Response(
-                {"error": "Compte verrouille : dossier KYC et contrat SGI a valider avant toute operation."},
-                status=403,
-            )
+    user = User.objects.filter(id=sess["userId"]).first()
+    if not user:
+        return Response({"error": "Utilisateur introuvable."}, status=404)
+    if user.kyc != "verified":
+        return Response(
+            {"error": "Compte verrouille : dossier KYC et contrat SGI a valider avant toute operation."},
+            status=403,
+        )
 
-        if kind in ("DEPOSIT", "RECHARGE"):
-            amount = money(price)
-            user.balance = money(user.balance + amount)
-            user.save()
+    if kind in ("DEPOSIT", "RECHARGE"):
+        # Paiement reel via Jeko (voir jeko.py) : plus de credit instantane
+        # non verifie. L'appel reseau se fait hors transaction DB (pas de
+        # verrou sur `user` pendant la requete HTTP sortante). Le solde n'est
+        # credite qu'a la confirmation du paiement (voir jeko_webhook et
+        # _credit_deposit, partages avec la validation manuelle admin).
+        amount = money(price)
+        if not settings.JEKO_API_KEY:
+            # ponytail: aucune cle Jeko configuree (dev local sans .env.docker
+            # rempli, ou CI -- voir .github/workflows/build.yml) -> repli sur
+            # le credit simule d'avant l'integration Jeko, pour que le reste
+            # de l'app (achat/vente, tests) reste utilisable sans compte Jeko.
+            # Ne se declenche jamais en prod : JEKO_API_KEY y est toujours
+            # renseigne (voir .env.docker).
             tx = Transaction.objects.create(
                 id=str(uuid.uuid4()),
                 user=user,
                 user_email=d.get("userEmail") or user.email,
                 user_name=d.get("userName") or user.name,
-                ticker=(d.get("ticker") or "CASH").upper(),
-                company=f"Dépôt {d.get('paymentMethod') or 'Wave CI'}",
+                ticker="CASH",
+                company="Dépôt (simulé — Jeko non configuré)",
                 type="DEPOSIT",
                 quantity=1,
                 price=amount,
@@ -520,13 +670,44 @@ def create_transaction(request, sess):
                 tva=0,
                 grand_total=amount,
                 status="validated",
-                payment_ref=d.get("paymentRef") or f"REF-{uuid.uuid4().hex[:6].upper()}",
-                payment_method=d.get("paymentMethod") or "Wave CI",
+                payment_ref=f"SIM-{uuid.uuid4().hex[:8]}",
+                payment_method="Simulé (dev)",
                 submitted_at=now_iso(),
                 processed_at=now_iso(),
                 processed_by="SYSTEM",
             )
+            user.balance = money(user.balance + amount)
+            user.save()
             return Response({"success": True, "data": tx.as_dict()}, status=201)
+        try:
+            link = jeko.create_payment_link(f"Depot BAOU - {user.name} - {int(amount)} FCFA", amount)
+        except jeko.JekoError as e:
+            return Response({"error": f"Paiement indisponible pour le moment ({e})."}, status=502)
+        tx = Transaction.objects.create(
+            id=str(uuid.uuid4()),
+            user=user,
+            user_email=d.get("userEmail") or user.email,
+            user_name=d.get("userName") or user.name,
+            ticker="CASH",
+            company="Dépôt Jeko",
+            type="DEPOSIT",
+            quantity=1,
+            price=amount,
+            total=amount,
+            fees=0,
+            tva=0,
+            grand_total=amount,
+            status="pending",
+            payment_ref=link["id"],
+            payment_method="Jeko",
+            submitted_at=now_iso(),
+        )
+        return Response({"success": True, "data": tx.as_dict(), "paymentUrl": link["link"]}, status=201)
+
+    # select_for_update : deux ordres simultanes ne doivent pas ecraser
+    # le meme solde (le store Node en memoire avait ce trou).
+    with db_transaction.atomic():
+        user = User.objects.select_for_update().filter(id=user.id).first()
 
         stock = brvm.find(d.get("ticker"))
         if not stock:
@@ -542,6 +723,18 @@ def create_transaction(request, sess):
                 {"error": f"Solde insuffisant ({user.balance} FCFA dispo, {grand_total:.0f} FCFA requis)."},
                 status=400,
             )
+        if kind == "SELL":
+            owned = _owned_quantity(user, stock["ticker"])
+            if qty > owned:
+                return Response(
+                    {"error": f"Vous ne détenez que {owned} titre(s) {stock['ticker']}."},
+                    status=400,
+                )
+            # Frais preleves a la vente comme a l'achat : le montant credite
+            # au solde (a la validation, cf. validate_transaction) est le net.
+            net = money(total - fees - tva)
+        else:
+            net = money(total)
 
         tx = Transaction.objects.create(
             id=str(uuid.uuid4()),
@@ -553,10 +746,10 @@ def create_transaction(request, sess):
             type=kind,
             quantity=qty,
             price=price,
-            total=money(total),
+            total=net,
             fees=money(fees),
             tva=money(tva),
-            grand_total=money(grand_total),
+            grand_total=money(grand_total) if kind != "SELL" else net,
             status="pending",
             payment_ref=d.get("paymentRef") or f"AUTO-{uuid.uuid4().hex[:8]}",
             payment_method=d.get("paymentMethod") or "Non spécifié",
@@ -573,6 +766,20 @@ def create_transaction(request, sess):
     return Response({"success": True, "data": tx.as_dict()}, status=201)
 
 
+def _credit_deposit(tx):
+    """Credite le solde pour un DEPOSIT/SELL/DIVIDEND valide -- partage entre
+    la validation manuelle admin (validate_transaction) et la confirmation
+    automatique par webhook Jeko (jeko_webhook). BUY est deja debite/gele a
+    la creation (voir create_transaction) : rien a refaire ici. Appeler dans
+    un bloc `db_transaction.atomic()` avec `tx` deja verrouille (select_for_update)."""
+    if tx.type == "BUY":
+        return
+    user = User.objects.select_for_update().filter(id=tx.user_id).first()
+    if user:
+        user.balance = max(0.0, money(user.balance + tx.total))
+        user.save()
+
+
 @api_view(["PATCH"])
 @require_auth(admin=True)
 def validate_transaction(request, tx_id):
@@ -587,16 +794,49 @@ def validate_transaction(request, tx_id):
         tx.processed_at = now_iso()
         tx.processed_by = request.session_data.get("userId") or "ADMIN"
         tx.save()
-
-        # BUY : deja debite/gele a la creation (create_transaction), rien a
-        # refaire ici. DEPOSIT est deja valide des la creation (jamais
-        # "pending"). SELL/DIVIDEND restent credites a la validation.
-        if tx.type != "BUY":
-            user = User.objects.select_for_update().filter(id=tx.user_id).first()
-            if user:
-                user.balance = max(0.0, money(user.balance + tx.total))
-                user.save()
+        _credit_deposit(tx)
     return Response({"success": True, "data": tx.as_dict()})
+
+
+@api_view(["POST"])
+def jeko_webhook(request):
+    """Webhook JEKO (`transaction.completed`) : credite le depot des que le
+    paiement est confirme cote Jeko. Voir
+    https://developer.jeko.africa/fr/integration/webhooks/integration
+
+    Pas de @require_auth : appele par les serveurs Jeko (pas de session/JWT),
+    authentifie par la signature HMAC (en-tete Jeko-Signature) a la place.
+    Repond toujours 200 sauf signature invalide, pour eviter les retries
+    Jeko sur des evenements deja traites ou qui ne nous concernent pas."""
+    raw = request.body
+    if not jeko.verify_signature(raw, request.headers.get("Jeko-Signature", "")):
+        return Response({"error": "Signature invalide."}, status=401)
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return Response({"error": "JSON invalide."}, status=400)
+
+    if payload.get("status") != "success" or payload.get("transactionType") != "payment":
+        return Response({"success": True})
+
+    link_id = (payload.get("transactionDetails") or {}).get("paymentLinkId")
+    if not link_id:
+        return Response({"success": True})
+
+    with db_transaction.atomic():
+        # status="pending" dans le filtre = idempotence : un webhook rejoue
+        # (retry Jeko) ne trouve plus rien a crediter la deuxieme fois.
+        tx = Transaction.objects.select_for_update().filter(
+            payment_ref=link_id, type="DEPOSIT", status="pending"
+        ).first()
+        if not tx:
+            return Response({"success": True})
+        tx.status = "validated"
+        tx.processed_at = now_iso()
+        tx.processed_by = "JEKO_WEBHOOK"
+        tx.save()
+        _credit_deposit(tx)
+    return Response({"success": True})
 
 
 @api_view(["PATCH"])

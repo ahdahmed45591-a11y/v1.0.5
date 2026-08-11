@@ -19,6 +19,34 @@ if not JWT_SECRET:
     )
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "/data/uploads")
 
+# Email de bienvenue (inscription) : compte Gmail du support. EMAIL_HOST_PASSWORD
+# doit etre un "mot de passe d'application" Google (pas le mot de passe du
+# compte -- Gmail refuse l'auth SMTP normale), genere sur
+# https://myaccount.google.com/apppasswords. Tant qu'il n'est pas renseigne,
+# l'envoi est simplement ignore (voir send_welcome_email) : l'inscription ne
+# doit jamais echouer a cause d'un email qui ne part pas.
+EMAIL_HOST = "smtp.gmail.com"
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "dramancis40@gmail.com")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL = f"BAOU Finance <{EMAIL_HOST_USER}>"
+
+# URL publique du backend (ngrok ou domaine reel) utilisee pour construire le
+# lien de confirmation dans l'email -- doit etre a jour dans .env.docker,
+# sinon le lien pointe vers localhost et ne marche pas depuis le telephone.
+BACKEND_PUBLIC_URL = os.environ.get("BACKEND_PUBLIC_URL", "http://localhost:3001")
+
+# Depots mobiles : paiement en ligne Jeko Africa (voir api/jeko.py). Cles +
+# storeId depuis https://cockpit.jeko.africa (Parametres > API & Webhooks).
+# JEKO_WEBHOOK_SECRET signe les webhooks entrants (HMAC-SHA256) -- meme page,
+# section webhook. Tant que ces valeurs sont vides, les depots echouent avec
+# un message explicite (voir create_transaction) plutot que de planter.
+JEKO_API_KEY = os.environ.get("JEKO_API_KEY", "")
+JEKO_API_KEY_ID = os.environ.get("JEKO_API_KEY_ID", "")
+JEKO_STORE_ID = os.environ.get("JEKO_STORE_ID", "")
+JEKO_WEBHOOK_SECRET = os.environ.get("JEKO_WEBHOOK_SECRET", "")
+
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",

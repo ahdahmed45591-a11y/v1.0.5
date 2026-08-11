@@ -14,6 +14,7 @@ class User(models.Model):
     profession = models.CharField(max_length=120, blank=True, default="")
     residence = models.CharField(max_length=200, blank=True, default="")
     kyc = models.CharField(max_length=20, default="pending")
+    email_verified = models.BooleanField(default=False)
     balance = models.FloatField(default=0.0)
     portfolio_value = models.FloatField(default=0.0)
     joined_at = models.CharField(max_length=40, blank=True, default="")
@@ -42,6 +43,7 @@ class User(models.Model):
             "profession": self.profession,
             "residence": self.residence,
             "kyc": self.kyc,
+            "emailVerified": self.email_verified,
             "balance": self.balance,
             "portfolioValue": self.portfolio_value,
             "joinedAt": self.joined_at,

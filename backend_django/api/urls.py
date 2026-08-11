@@ -8,6 +8,9 @@ urlpatterns = [
 
     path("api/auth/login", views.login),
     path("api/auth/register", views.register),
+    path("api/auth/verify-email", views.verify_email),
+    path("api/auth/request-password-reset", views.request_password_reset),
+    path("api/auth/reset-password", views.reset_password),
     path("api/auth/logout", views.logout),
     path("api/auth/profile", views.profile),
     path("api/auth/update-profile", views.profile),
@@ -32,6 +35,8 @@ urlpatterns = [
     path("api/admin/support", views.admin_support),
     path("api/admin/support/<str:ticket_id>/status", views.admin_ticket_status),
     path("api/admin/chat/<str:user_id>", views.admin_chat),
+
+    path("api/webhooks/jeko", views.jeko_webhook),
 
     # Pieces KYC : proprietaire ou admin seulement (voir views.uploads).
     re_path(r"^uploads/(?P<path>.*)$", views.uploads),

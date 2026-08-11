@@ -4,6 +4,7 @@ import { initialMarketQuotes } from './data';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { DashboardView } from './components/DashboardView';
+import { DashboardBaouView } from './components/DashboardBaouView';
 import { TransactionsView } from './components/TransactionsView';
 import { UserManagementView } from './components/UserManagementView';
 import { SettingsView } from './components/SettingsView';
@@ -45,6 +46,7 @@ function mapUser(u: any, token: string): User {
     email: u.email || '',
     avatar: u.avatar || DEFAULT_AVATAR,
     accountType: u.accountType === 'Premium' ? 'Premium' : 'Standard',
+    balance: typeof u.balance === 'number' ? u.balance : (parseFloat(u.balance) || 0),
     kycStatus:
       kyc === 'verified'
         ? 'VERIFIED'
@@ -103,8 +105,13 @@ function mapTransaction(t: any): Transaction {
         : s === 'rejected'
         ? 'REJECTED'
         : 'PENDING',
-    paymentMethod: t.paymentMethod || 'Wave CI',
-    paymentMethodCode: (t.paymentMethod || '').toLowerCase().includes('wave') ? 'WV' : 'OM',
+    paymentMethod: t.paymentMethod || 'Jeko',
+    paymentMethodCode: (() => {
+      const m = (t.paymentMethod || '').toLowerCase();
+      if (m.includes('jeko') || m.includes('jèko')) return 'JK';
+      if (m.includes('wave')) return 'WV';
+      return 'OM';
+    })(),
     reference: t.paymentRef || `REF-${t.id}`,
     proofFileName: `Reçu_${t.id}.pdf`,
     proofFileSize: '1.2 MB',
@@ -740,6 +747,22 @@ export default function App() {
               onApproveTransaction={handleApproveTransaction}
               onRejectTransaction={handleRejectTransaction}
               onNewTransactionClick={() => setShowNewOpModal(true)}
+            />
+          )}
+
+          {currentPage === Page.DashboardBaou && (
+            <DashboardBaouView
+              transactions={transactions}
+              users={users}
+              tickets={tickets}
+              onSelectTransaction={(tx) => {
+                setSelectedTransaction(tx);
+                setCurrentPage(Page.Transactions);
+              }}
+              onApproveTransaction={handleApproveTransaction}
+              onRejectTransaction={handleRejectTransaction}
+              onNewTransactionClick={() => setShowNewOpModal(true)}
+              onNavigate={setCurrentPage}
             />
           )}
 

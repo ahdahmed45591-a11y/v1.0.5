@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -228,7 +229,15 @@ class _LoginScreenState extends State<LoginScreen> {
                               strokeWidth: 2, color: Colors.white))
                       : const Text('Se connecter'),
                 ),
-                const SizedBox(height: 16),
+                Center(
+                  child: TextButton(
+                    onPressed: () => Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => const ForgotPasswordScreen())),
+                    child: const Text('Mot de passe oublié ?',
+                        style: TextStyle(color: Colors.black54)),
+                  ),
+                ),
+                const SizedBox(height: 4),
                 Center(
                   child: TextButton(
                     onPressed: () => Navigator.push(context,
@@ -246,6 +255,141 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ],
             ),
+          ),
+        ),
+      );
+}
+
+// -------------------------------------------------------- mot de passe oublie
+
+class ForgotPasswordScreen extends StatefulWidget {
+  const ForgotPasswordScreen({super.key});
+  @override
+  State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
+}
+
+class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
+  final _email = TextEditingController();
+  final _code = TextEditingController();
+  final _newPassword = TextEditingController();
+  bool _busy = false;
+  bool _codeSent = false;
+  bool _hide = true;
+
+  @override
+  void dispose() {
+    _email.dispose();
+    _code.dispose();
+    _newPassword.dispose();
+    super.dispose();
+  }
+
+  Future<void> _sendCode() async {
+    if (!_email.text.contains('@')) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('E-mail invalide')));
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await Repo.requestPasswordReset(_email.text.trim());
+      if (!mounted) return;
+      setState(() => _codeSent = true);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Si ce compte existe, un code a été envoyé par e-mail.')));
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _resetPassword() async {
+    if (_code.text.trim().isEmpty || _newPassword.text.length < 6) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Collez le code reçu et choisissez un mot de passe (6 caractères min.)')));
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      await Repo.resetPassword(_code.text.trim(), _newPassword.text);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Mot de passe mis à jour. Connectez-vous.')));
+      Navigator.pop(context);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Mot de passe oublié')),
+        body: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.all(24),
+            children: [
+              Text(
+                _codeSent
+                    ? 'Collez le code reçu par e-mail et choisissez un nouveau mot de passe.'
+                    : "Entrez l'e-mail de votre compte : un code de réinitialisation valable 1 heure vous sera envoyé.",
+                style: const TextStyle(color: Colors.black54),
+              ),
+              const SizedBox(height: 20),
+              TextField(
+                controller: _email,
+                enabled: !_codeSent,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(labelText: 'E-mail'),
+              ),
+              const SizedBox(height: 16),
+              if (!_codeSent)
+                FilledButton(
+                  onPressed: _busy ? null : _sendCode,
+                  child: _busy
+                      ? const SizedBox(
+                          height: 20, width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Text('Envoyer le code'),
+                ),
+              if (_codeSent) ...[
+                TextField(
+                  controller: _code,
+                  minLines: 1,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                      labelText: 'Code reçu par e-mail', alignLabelWithHint: true),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _newPassword,
+                  obscureText: _hide,
+                  decoration: InputDecoration(
+                    labelText: 'Nouveau mot de passe',
+                    suffixIcon: IconButton(
+                      icon: Icon(_hide ? Icons.visibility_off : Icons.visibility),
+                      onPressed: () => setState(() => _hide = !_hide),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                FilledButton(
+                  onPressed: _busy ? null : _resetPassword,
+                  child: _busy
+                      ? const SizedBox(
+                          height: 20, width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Text('Réinitialiser le mot de passe'),
+                ),
+                TextButton(
+                  onPressed: _busy ? null : _sendCode,
+                  child: const Text('Renvoyer le code'),
+                ),
+              ],
+            ],
           ),
         ),
       );
@@ -574,6 +718,10 @@ class HomeTab extends StatelessWidget {
                   await Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const DepositScreen()));
                 }),
+                _Action(Icons.sell_outlined, 'Vendre', () {
+                  Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => const SellHoldingsScreen()));
+                }),
                 _Action(Icons.history, 'Historique', () {
                   Navigator.push(context,
                       MaterialPageRoute(builder: (_) => const HistoryScreen()));
@@ -786,7 +934,6 @@ class DepositScreen extends StatefulWidget {
 
 class _DepositScreenState extends State<DepositScreen> {
   final _amount = TextEditingController();
-  Funding _src = fundingSources.first;
 
   @override
   void dispose() {
@@ -796,40 +943,6 @@ class _DepositScreenState extends State<DepositScreen> {
 
   double get _value => double.tryParse(_amount.text) ?? 0;
 
-  Future<void> _pickSource() async {
-    final f = await showModalBottomSheet<Funding>(
-      context: context,
-      showDragHandle: true,
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text('Choisir un opérateur',
-                    style:
-                        TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-              ),
-            ),
-            for (final f in fundingSources)
-              ListTile(
-                leading: CircleAvatar(
-                    backgroundColor: f.color,
-                    child: Text(f.label[0],
-                        style: TextStyle(color: f.textColor, fontWeight: FontWeight.w700))),
-                title: Text(f.label),
-                subtitle: Text(f.sub),
-                onTap: () => Navigator.pop(context, f),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (f != null) setState(() => _src = f);
-  }
-
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Dépôt')),
@@ -837,20 +950,10 @@ class _DepositScreenState extends State<DepositScreen> {
           padding: const EdgeInsets.all(16),
           child: Column(
             children: [
-              Card(
-                child: ListTile(
-                  leading: CircleAvatar(
-                      backgroundColor: _src.color,
-                      child: Text(_src.label[0],
-                          style: TextStyle(
-                              color: _src.textColor, fontWeight: FontWeight.w700))),
-                  title: Text(_src.label),
-                  subtitle: Text(_src.sub),
-                  trailing: TextButton(
-                      onPressed: _pickSource, child: const Text('Changer')),
-                ),
-              ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 16),
+              Text('Combien voulez-vous déposer ?',
+                  style: Theme.of(context).textTheme.bodyMedium),
+              const SizedBox(height: 16),
               TextField(
                 controller: _amount,
                 autofocus: true,
@@ -864,16 +967,19 @@ class _DepositScreenState extends State<DepositScreen> {
                 onChanged: (_) => setState(() {}),
               ),
               const Spacer(),
+              Text('Orange Money, Wave, MTN, carte bancaire — via Jèko.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 12),
               FilledButton(
                 onPressed: _value <= 0
                     ? null
                     : () => Navigator.push(
                           context,
                           MaterialPageRoute(
-                              builder: (_) =>
-                                  PhoneEntryScreen(amount: _value, source: _src)),
+                              builder: (_) => JekoPaymentScreen(amount: _value)),
                         ),
-                child: const Text('Continuer'),
+                child: const Text('Payer avec Jèko'),
               ),
             ],
           ),
@@ -881,174 +987,152 @@ class _DepositScreenState extends State<DepositScreen> {
       );
 }
 
-class PhoneEntryScreen extends StatefulWidget {
-  const PhoneEntryScreen({super.key, required this.amount, required this.source});
+/// Ouvre le lien de paiement Jèko dans le navigateur, puis attend la
+/// confirmation reelle (webhook cote backend, voir jeko_webhook) : sondage
+/// periodique + verification immediate au retour dans l'application (voir
+/// didChangeAppLifecycleState, c'est le "retour dans l'app" apres paiement).
+class JekoPaymentScreen extends StatefulWidget {
+  const JekoPaymentScreen({super.key, required this.amount});
   final double amount;
-  final Funding source;
   @override
-  State<PhoneEntryScreen> createState() => _PhoneEntryScreenState();
+  State<JekoPaymentScreen> createState() => _JekoPaymentScreenState();
 }
 
-class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
-  final _form = GlobalKey<FormState>();
-  final _phone = TextEditingController();
+enum _DepositStep { starting, waiting, done, error }
+
+class _JekoPaymentScreenState extends State<JekoPaymentScreen> with WidgetsBindingObserver {
+  _DepositStep _step = _DepositStep.starting;
+  String? _txId;
+  String? _error;
+  Timer? _poll;
+  bool _checking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _start();
+  }
 
   @override
   void dispose() {
-    _phone.dispose();
+    WidgetsBinding.instance.removeObserver(this);
+    _poll?.cancel();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: Text('Payer avec ${widget.source.label}')),
-        body: Form(
-          key: _form,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                TextFormField(
-                  controller: _phone,
-                  keyboardType: TextInputType.phone,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(10),
-                  ],
-                  decoration: InputDecoration(
-                      labelText: 'Numéro ${widget.source.label}',
-                      hintText: '07 00 00 00 00'),
-                  validator: (v) =>
-                      phoneValid(v ?? '') ? null : 'Numéro invalide (10 chiffres)',
-                ),
-                const SizedBox(height: 12),
-                Text(
-                    'Un code de confirmation ${widget.source.label} vous sera envoyé par SMS.',
-                    style: Theme.of(context).textTheme.bodySmall),
-                const Spacer(),
-                FilledButton(
-                  onPressed: () {
-                    if (!_form.currentState!.validate()) return;
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ReviewScreen(
-                          amount: widget.amount,
-                          source: widget.source,
-                          phone: _phone.text,
-                        ),
-                      ),
-                    );
-                  },
-                  child: const Text('Continuer'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-}
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _step == _DepositStep.waiting) _check();
+  }
 
-class ReviewScreen extends StatefulWidget {
-  const ReviewScreen(
-      {super.key, required this.amount, required this.source, required this.phone});
-  final double amount;
-  final Funding source;
-  final String phone;
-  @override
-  State<ReviewScreen> createState() => _ReviewScreenState();
-}
-
-class _ReviewScreenState extends State<ReviewScreen> {
-  bool _busy = false;
-
-  Future<void> _confirm() async {
-    setState(() => _busy = true);
+  Future<void> _start() async {
     try {
-      await Repo.topUp(widget.amount, widget.source.label);
-      await app.refresh();
+      final res = await Repo.initDeposit(widget.amount);
+      final tx = res['data'] as Map<String, dynamic>?;
+      if (tx == null) throw ApiException('Réponse de paiement invalide.');
+      if (tx['status'] == 'validated') {
+        // Jeko non configure cote serveur (dev/CI, voir create_transaction) :
+        // deja credite, rien a ouvrir.
+        await app.refresh();
+        if (!mounted) return;
+        setState(() => _step = _DepositStep.done);
+        return;
+      }
+      final url = res['paymentUrl'] as String?;
+      if (url == null) throw ApiException('Lien de paiement indisponible.');
+      _txId = tx['id'] as String?;
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
       if (!mounted) return;
-      await showModalBottomSheet(
-        context: context,
-        isDismissible: false,
-        builder: (_) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const CircleAvatar(
-                    radius: 28,
-                    backgroundColor: brandGreen,
-                    child: Icon(Icons.check, color: Colors.white, size: 32)),
-                const SizedBox(height: 16),
-                const Text('Votre argent est arrivé !',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 8),
-                const Text('Le solde a été mis à jour.', textAlign: TextAlign.center),
-                const SizedBox(height: 24),
-                FilledButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Terminé')),
-              ],
-            ),
-          ),
-        ),
-      );
-      if (mounted) Navigator.popUntil(context, (r) => r.isFirst);
+      setState(() => _step = _DepositStep.waiting);
+      _poll = Timer.periodic(const Duration(seconds: 4), (_) => _check());
     } on ApiException catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      if (mounted) setState(() { _step = _DepositStep.error; _error = e.message; });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _step = _DepositStep.error;
+          _error = "Impossible d'ouvrir la page de paiement.";
+        });
+      }
+    }
+  }
+
+  Future<void> _check() async {
+    if (_txId == null || _checking) return;
+    _checking = true;
+    try {
+      final rows = await Repo.transactions();
+      final match = rows.where((t) => t.id == _txId);
+      if (match.isNotEmpty && match.first.status == 'validated') {
+        _poll?.cancel();
+        await app.refresh();
+        if (!mounted) return;
+        setState(() => _step = _DepositStep.done);
+      }
+    } on ApiException {
+      // Sondage silencieux : une erreur reseau ponctuelle ne doit pas
+      // interrompre l'attente, le prochain tick reessaiera.
     } finally {
-      if (mounted) setState(() => _busy = false);
+      _checking = false;
     }
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Vérification du dépôt')),
+        appBar: AppBar(title: const Text('Dépôt Jèko')),
         body: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              Card(
-                child: Column(
-                  children: [
-                    ListTile(
-                        leading: CircleAvatar(
-                            backgroundColor: widget.source.color,
-                            child: Text(widget.source.label[0],
-                                style: TextStyle(color: widget.source.textColor))),
-                        title: Text(widget.source.label),
-                        trailing: Text(money(widget.amount))),
-                    ListTile(
-                        title: const Text('Numéro'),
-                        trailing: Text('•••• ${widget.phone.length >= 4 ? widget.phone.substring(widget.phone.length - 4) : widget.phone}')),
-                    ListTile(
-                      title: const Text('Frais — gratuit la première fois !'),
-                      trailing: Text(money(0), style: const TextStyle(color: brandGreen)),
-                    ),
-                  ],
-                ),
-              ),
-              const Spacer(),
-              FilledButton(
-                onPressed: _busy ? null : _confirm,
-                child: _busy
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
-                    : const Text('Confirmer'),
-              ),
-              TextButton(
-                  onPressed: _busy ? null : () => Navigator.pop(context),
-                  child: const Text('Annuler')),
-            ],
-          ),
+          padding: const EdgeInsets.all(24),
+          child: Center(child: _body(context)),
         ),
       );
+
+  Widget _body(BuildContext context) {
+    switch (_step) {
+      case _DepositStep.starting:
+        return const Column(mainAxisSize: MainAxisSize.min, children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 16),
+          Text('Préparation du paiement…'),
+        ]);
+      case _DepositStep.waiting:
+        return Column(mainAxisSize: MainAxisSize.min, children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 16),
+          Text('En attente de la confirmation du paiement de ${money(widget.amount)}…',
+              textAlign: TextAlign.center),
+          const SizedBox(height: 8),
+          Text('Une fois le paiement effectué sur la page Jèko, revenez ici.',
+              textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(height: 24),
+          OutlinedButton(onPressed: _check, child: const Text("J'ai payé, vérifier")),
+        ]);
+      case _DepositStep.done:
+        return Column(mainAxisSize: MainAxisSize.min, children: [
+          const CircleAvatar(
+              radius: 28,
+              backgroundColor: brandGreen,
+              child: Icon(Icons.check, color: Colors.white, size: 32)),
+          const SizedBox(height: 16),
+          const Text('Votre argent est arrivé !',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          const Text('Le solde a été mis à jour.', textAlign: TextAlign.center),
+          const SizedBox(height: 24),
+          FilledButton(
+              onPressed: () => Navigator.popUntil(context, (r) => r.isFirst),
+              child: const Text('Terminé')),
+        ]);
+      case _DepositStep.error:
+        return Column(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.error_outline, color: Colors.red, size: 40),
+          const SizedBox(height: 16),
+          Text(_error ?? 'Une erreur est survenue.', textAlign: TextAlign.center),
+          const SizedBox(height: 24),
+          FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Retour')),
+        ]);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------- brvm
@@ -1358,6 +1442,173 @@ class _BuyStockScreenState extends State<BuyStockScreen> {
       );
 
   Widget _row(String label, String value, {bool bold = false}) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            Text(label, style: TextStyle(color: bold ? null : Colors.black54)),
+            const Spacer(),
+            Text(value,
+                style: TextStyle(
+                    fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
+                    fontSize: bold ? 16 : 14)),
+          ],
+        ),
+      );
+}
+
+class SellHoldingsScreen extends StatelessWidget {
+  const SellHoldingsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Vendre des titres')),
+        body: ListenableBuilder(
+          listenable: app,
+          builder: (context, _) => app.holdings.isEmpty
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text('Aucun titre en portefeuille pour le moment.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.black54)),
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: app.holdings.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, i) {
+                    final h = app.holdings[i];
+                    final stock = findStock(h.ticker);
+                    return ListTile(
+                      leading: CircleAvatar(
+                          backgroundColor: brandOrange.withValues(alpha: .12),
+                          child: Text(h.ticker.substring(0, 2),
+                              style: const TextStyle(
+                                  color: brandOrange, fontSize: 12, fontWeight: FontWeight.w700))),
+                      title: Text(h.company),
+                      subtitle: Text('${h.quantity} titres détenus • PRU ${money(h.avgPrice)}'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: stock == null
+                          ? null
+                          : () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => SellStockScreen(stock: stock, maxQty: h.quantity))),
+                    );
+                  },
+                ),
+        ),
+      );
+}
+
+class SellStockScreen extends StatefulWidget {
+  const SellStockScreen({super.key, required this.stock, required this.maxQty});
+  final Stock stock;
+  final int maxQty;
+  @override
+  State<SellStockScreen> createState() => _SellStockScreenState();
+}
+
+class _SellStockScreenState extends State<SellStockScreen> {
+  late int _qty = widget.maxQty > 0 ? 1 : 0;
+  bool _busy = false;
+
+  double get _total => _qty * widget.stock.price;
+  double get _fees => _total * 0.005;
+  double get _tva => _fees * 0.18;
+  double get _net => _total - _fees - _tva;
+
+  Future<void> _confirm() async {
+    setState(() => _busy = true);
+    try {
+      await Repo.sell(widget.stock, _qty);
+      await app.refresh();
+      if (!mounted) return;
+      await showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Ordre de vente envoyé'),
+          content: Text(
+              '$_qty ${widget.stock.ticker} pour ${money(_net)} net, en attente de validation.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context), child: const Text('OK')),
+          ],
+        ),
+      );
+      if (mounted) Navigator.popUntil(context, (r) => r.isFirst);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: Text('Vendre ${widget.stock.ticker}')),
+        body: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              Text(widget.stock.company,
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+              Text('${widget.maxQty} titres détenus',
+                  style: const TextStyle(color: Colors.black54)),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton.filledTonal(
+                    onPressed: _qty > 1 ? () => setState(() => _qty--) : null,
+                    icon: const Icon(Icons.remove),
+                  ),
+                  SizedBox(
+                    width: 80,
+                    child: Text('$_qty',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w700)),
+                  ),
+                  IconButton.filledTonal(
+                    onPressed: _qty < widget.maxQty ? () => setState(() => _qty++) : null,
+                    icon: const Icon(Icons.add),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      _sellRow('Sous-total', money(_total)),
+                      _sellRow('Frais (0,5 %)', '- ${money(_fees)}'),
+                      _sellRow('TVA', '- ${money(_tva)}'),
+                      const Divider(),
+                      _sellRow('Net crédité', money(_net), bold: true),
+                    ],
+                  ),
+                ),
+              ),
+              const Spacer(),
+              FilledButton(
+                onPressed: (_busy || _qty <= 0) ? null : _confirm,
+                child: _busy
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : const Text('Confirmer la vente'),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  Widget _sellRow(String label, String value, {bool bold = false}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(
           children: [

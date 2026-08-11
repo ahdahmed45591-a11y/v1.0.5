@@ -489,7 +489,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             className="bg-white border border-[#dec1af]/40 rounded-lg px-3 py-1.5 text-[13px] font-sans text-[#0b1c30] focus:outline-none focus:ring-1 focus:ring-[#ff8200] outline-none shadow-sm min-w-[160px]"
           >
             <option value="ALL">Tous Types</option>
-            <option value="DEPOSIT">💰 Dépôt (Wave / Orange Money)</option>
+            <option value="DEPOSIT">💰 Dépôt (Jèko)</option>
             <option value="BUY">📈 Achat (Stock)</option>
             <option value="SELL">📉 Vente (Liquidation)</option>
           </select>
@@ -615,7 +615,11 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                     {/* Payment Method Badge */}
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
-                        {tx.paymentMethodCode === 'OM' ? (
+                        {tx.paymentMethodCode === 'JK' ? (
+                          <div className="w-6 h-6 rounded bg-[#0b1c30] flex items-center justify-center text-[10px] text-white font-extrabold shadow-sm shrink-0">
+                            JK
+                          </div>
+                        ) : tx.paymentMethodCode === 'OM' ? (
                           <div className="w-6 h-6 rounded bg-[#F79E1B] flex items-center justify-center text-[10px] text-white font-extrabold shadow-sm shrink-0">
                             OM
                           </div>
@@ -629,7 +633,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                           </div>
                         )}
                         <span className="font-sans text-[13px] font-medium text-[#0b1c30]">
-                          {tx.paymentMethodCode === 'OM' ? 'Orange Money' : tx.paymentMethodCode === 'WV' ? 'Wave' : 'Virement Bank'}
+                          {tx.paymentMethodCode === 'JK' ? 'Jèko' : tx.paymentMethodCode === 'OM' ? 'Orange Money' : tx.paymentMethodCode === 'WV' ? 'Wave' : 'Virement Bank'}
                         </span>
                       </div>
                     </td>

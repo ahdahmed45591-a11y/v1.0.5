@@ -1,5 +1,6 @@
 export enum Page {
   Dashboard = 'Dashboard',
+  DashboardBaou = 'DashboardBaou',
   Transactions = 'Transactions',
   UserManagement = 'UserManagement',
   Settings = 'Settings',
@@ -24,7 +25,7 @@ export interface Transaction {
   dateString: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ANONYMIZED';
   paymentMethod: string;
-  paymentMethodCode: 'OM' | 'WV' | 'BANK';
+  paymentMethodCode: 'OM' | 'WV' | 'JK' | 'BANK';
   reference: string;
   proofFileName: string;
   proofFileSize: string;
@@ -48,6 +49,7 @@ export interface User {
   email: string;
   avatar: string;
   accountType: 'Premium' | 'Standard';
+  balance?: number;
   kycStatus: 'VERIFIED' | 'PENDING' | 'REJECTED';
   lastActivityDate: string;
   lastActivityPlatform: string;

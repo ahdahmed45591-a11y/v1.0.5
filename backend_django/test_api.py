@@ -6,15 +6,36 @@
 Aucune dependance : urllib seulement.
 """
 
+import hashlib
+import hmac
+import http.client
 import json
 import os
 import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
+from urllib.parse import urlsplit
 
 BASE = os.environ.get("BASE", "http://localhost:3001")
 ADMIN = ("admin@elephantbourse.ci", "admin2024")
+
+
+def _env_docker_value(key):
+    """Lit une valeur depuis .env.docker (racine du repo) sans dependance --
+    utilise pour simuler un webhook Jeko signe (voir test du depot). Fichier
+    absent en CI (gitignore) : renvoie "" plutot que planter, le depot tombe
+    alors sur le repli simule cote serveur (voir create_transaction) et cette
+    fonction n'est jamais appelee."""
+    path = Path(__file__).resolve().parent.parent / ".env.docker"
+    if not path.exists():
+        return ""
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if line.startswith(f"{key}="):
+            return line.split("=", 1)[1].strip()
+    return ""
 
 
 def call(method, path, body=None, token=None, expect=200):
@@ -51,6 +72,19 @@ def raw_status(path, token=None):
     return raw_get(path, token=token)[0]
 
 
+def redirect_target(path):
+    """GET sans suivre la redirection -- urllib suit les 302 automatiquement
+    et plante sur un scheme custom (baou://), inutilisable ici."""
+    u = urlsplit(BASE)
+    conn = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=15)
+    conn.request("GET", path)
+    r = conn.getresponse()
+    status, location = r.status, r.getheader("Location")
+    r.read()
+    conn.close()
+    return status, location
+
+
 def main():
     call("GET", "/health")
 
@@ -61,9 +95,22 @@ def main():
     user = call("POST", "/api/auth/register",
                 {"email": email, "password": "password123", "name": "Test Client"}, expect=201)["user"]
     assert user["balance"] == 0 and user["kyc"] == "pending"
+    assert user["emailVerified"] is False, user  # pas encore clique sur le lien recu par email
     call("POST", "/api/auth/register",
          {"email": email, "password": "x", "name": "Doublon"}, expect=409)
     call("POST", "/api/auth/register", {"email": "", "password": "", "name": ""}, expect=400)
+
+    # Lien de confirmation : redirige vers l'app (baou://), jamais un 200 JSON.
+    status, location = redirect_target("/api/auth/verify-email?token=nimportequoi")
+    assert status == 302 and location == "baou://verify-email?ok=0", (status, location)
+    status, location = redirect_target("/api/auth/verify-email")
+    assert status == 302 and location == "baou://verify-email?ok=0", (status, location)
+
+    # Mot de passe oublie : meme reponse que le compte existe ou non (anti-enumeration)
+    call("POST", "/api/auth/request-password-reset", {"email": email}, expect=200)
+    call("POST", "/api/auth/request-password-reset", {"email": "personne@nulle-part.ci"}, expect=200)
+    call("POST", "/api/auth/reset-password", {"token": "nimportequoi", "newPassword": "nouveaumdp"}, expect=400)
+    call("POST", "/api/auth/reset-password", {"token": "nimportequoi", "newPassword": "abc"}, expect=400)
 
     token = call("POST", "/api/auth/login", {"email": email, "password": "password123"})["token"]
     call("GET", "/api/admin/users", token=token, expect=403)
@@ -126,10 +173,31 @@ def main():
     verified = call("PATCH", f"/api/admin/users/{user['id']}/kyc", {"status": "verified"}, token=admin_token)["data"]
     assert verified["kyc"] == "verified", verified
 
-    # Depot : credite immediatement, statut validated
-    dep = call("POST", "/api/transactions",
-               {"type": "DEPOSIT", "price": 500000, "paymentMethod": "Wave CI"},
-               token=token, expect=201)["data"]
+    # Depot : deux modes valides selon la config du backend (voir
+    # create_transaction) -- "pending" + lien Jeko reel si JEKO_API_KEY est
+    # renseigne (.env.docker), "validated" instantane (repli simule) sinon
+    # (cas de la CI, qui n'a pas de compte Jeko : voir build.yml).
+    dep_res = call("POST", "/api/transactions", {"type": "DEPOSIT", "price": 500000}, token=token, expect=201)
+    dep = dep_res["data"]
+    if dep["status"] == "pending":
+        assert dep_res["paymentUrl"].startswith("https://pay.jeko.africa/"), dep_res
+
+        # Webhook Jeko simule (meme forme que la doc), signe avec le secret de
+        # .env.docker -- verifie la signature ET le credit du solde.
+        webhook_secret = _env_docker_value("JEKO_WEBHOOK_SECRET")
+        assert webhook_secret, "JEKO_WEBHOOK_SECRET absent de .env.docker : impossible de confirmer le depot"
+        webhook_body = json.dumps({
+            "id": "txn_test", "status": "success", "transactionType": "payment",
+            "transactionDetails": {"paymentLinkId": dep["paymentRef"]},
+        }).encode()
+        signature = hmac.new(webhook_secret.encode(), webhook_body, hashlib.sha256).hexdigest()
+        req = urllib.request.Request(
+            BASE + "/api/webhooks/jeko", method="POST", data=webhook_body,
+            headers={"Content-Type": "application/json", "Jeko-Signature": signature},
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            assert r.status == 200, r.status
+        dep = call("GET", "/api/transactions", token=token)["data"][0]
     assert dep["status"] == "validated" and dep["grandTotal"] == 500000, dep
 
     # Achat sans provision suffisante -> refuse (plus le verrou, le solde)
@@ -161,6 +229,25 @@ def main():
     rejected = call("PATCH", f"/api/transactions/{sell['id']}/reject",
                     {"reason": "Test"}, token=admin_token)["data"]
     assert rejected["status"] == "rejected" and rejected["rejectionReason"] == "Test"
+
+    # Vente > titres detenus (2 SNTS valides) -> refuse
+    call("POST", "/api/transactions",
+         {"ticker": "SNTS", "type": "SELL", "quantity": 999, "price": price},
+         token=token, expect=400)
+
+    # Vente valide : frais 0,5 % + TVA 18 % retenus, credit net a la validation
+    sell2 = call("POST", "/api/transactions",
+                 {"ticker": "SNTS", "type": "SELL", "quantity": qty, "price": price},
+                 token=token, expect=201)["data"]
+    assert sell2["total"] == round(2000.0 - 10.0 - 1.8, 2), sell2
+    call("PATCH", f"/api/transactions/{sell2['id']}/validate", {}, token=admin_token)
+    me2 = next(u for u in call("GET", "/api/admin/users", token=admin_token)["data"] if u["id"] == user["id"])
+    assert me2["balance"] == round(me["balance"] + 1988.2, 2), me2["balance"]
+
+    # Les titres sont maintenant vendus : impossible de les revendre
+    call("POST", "/api/transactions",
+         {"ticker": "SNTS", "type": "SELL", "quantity": 1, "price": price},
+         token=token, expect=400)
 
     # Entrees non numeriques : 400, pas 500
     call("POST", "/api/transactions",

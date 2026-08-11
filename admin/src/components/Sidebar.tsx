@@ -2,6 +2,7 @@ import React from 'react';
 import { Page } from '../types';
 import {
   LayoutDashboard,
+  Sparkles,
   ArrowLeftRight,
   Users,
   Settings,
@@ -33,6 +34,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const menuItems = [
     { id: Page.Dashboard,       label: 'Tableau de bord', icon: LayoutDashboard },
+    { id: Page.DashboardBaou,   label: 'Dashboard BAOU',  icon: Sparkles },
     { id: Page.Transactions,    label: 'Transactions',    icon: ArrowLeftRight },
     { id: Page.UserManagement,  label: 'Clients',         icon: Users },
     { id: Page.Settings,        label: 'Paramètres',      icon: Settings },

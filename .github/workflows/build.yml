@@ -51,7 +51,6 @@ jobs:
     - name: Migrate and Seed
       working-directory: backend_django
       run: |
-        python manage.py makemigrations api --noinput
         python manage.py migrate --noinput
         python manage.py seed
 

@@ -1,5 +1,3 @@
-import 'package:flutter/material.dart';
-
 import 'api.dart';
 
 /// FCFA n'a pas de centimes en usage courant. Regroupement par espaces,
@@ -15,7 +13,10 @@ String money(double v) {
   return '${v < 0 ? '-' : ''}$buf FCFA';
 }
 
-/// Numero mobile ivoirien : 10 chiffres, commence par 0.
+/// Numero mobile ivoirien : 10 chiffres, commence par 0. Plus utilise par le
+/// depot (Jeko collecte le numero sur sa propre page de paiement) mais garde
+/// pour le champ WhatsApp du profil (test/data_test.dart) et une reutilisation
+/// future.
 bool phoneValid(String s) => RegExp(r'^0\d{9}$').hasMatch(s.replaceAll(' ', ''));
 
 DateTime _parseDate(String? iso) {
@@ -25,12 +26,14 @@ DateTime _parseDate(String? iso) {
 
 class Txn {
   const Txn(this.name, this.amount, this.note, this.date,
-      {this.ticker = '',
+      {this.id = '',
+      this.ticker = '',
       this.company = '',
       this.quantity = 0,
       this.unitPrice = 0,
       this.type = '',
       this.status = 'validated'});
+  final String id;
   final String name;
   final double amount; // negatif = sortant
   final String note;
@@ -46,21 +49,6 @@ class Txn {
       .join()
       .toUpperCase();
 }
-
-/// Operateur de mobile money. [color]/[textColor] tiennent lieu de logo tant
-/// qu'un vrai fichier de marque n'est pas fourni — remplacer par Image.asset
-/// une fois les logos Wave/Orange/MTN disponibles sous licence.
-class Funding {
-  const Funding(this.label, this.sub, this.color, this.textColor);
-  final String label, sub;
-  final Color color, textColor;
-}
-
-const fundingSources = [
-  Funding('Wave CI', 'Paiement mobile Wave', Color(0xFF1DC8E0), Colors.white),
-  Funding('Orange Money', 'Paiement mobile Orange', Color(0xFFFF6600), Colors.white),
-  Funding('MTN Money', 'Paiement mobile MTN', Color(0xFFFFCC00), Colors.black87),
-];
 
 class Stock {
   const Stock(this.ticker, this.company, this.sector, this.price, this.change,
@@ -145,6 +133,7 @@ class Repo {
               _txnAmount(t),
               _txnNote(t),
               _parseDate((t['processedAt'] ?? t['submittedAt'])?.toString()),
+              id: (t['id'] ?? '').toString(),
               ticker: (t['ticker'] ?? '').toString(),
               company: (t['company'] ?? '').toString(),
               quantity: (t['quantity'] as num?)?.toInt() ?? 0,
@@ -178,16 +167,26 @@ class Repo {
     return brvmStocks;
   }
 
-  /// Depot mobile money : le serveur valide et credite le solde
-  /// immediatement (voir create_transaction, branche DEPOSIT/RECHARGE).
-  static Future<void> topUp(double amount, String method) =>
-      Api.post('/api/transactions', {'type': 'DEPOSIT', 'price': amount, 'paymentMethod': method});
+  /// Depot : cree un lien de paiement Jeko pour `amount` et renvoie la
+  /// reponse brute (contient `data` la transaction "pending" + `paymentUrl`
+  /// a ouvrir). Le solde n'est credite qu'a la confirmation reelle du
+  /// paiement (webhook Jeko, voir jeko_webhook cote backend) — plus de
+  /// credit instantane non verifie.
+  static Future<Map<String, dynamic>> initDeposit(double amount) =>
+      Api.post('/api/transactions', {'type': 'DEPOSIT', 'price': amount});
 
   /// Ordre d'achat : cree une transaction BUY "pending". Le solde n'est
   /// debite qu'a la validation admin (voir validate_transaction) — le
   /// serveur refuse deja si le solde est insuffisant au moment de l'ordre.
   static Future<void> buy(Stock stock, int qty) => Api.post(
       '/api/transactions', {'type': 'BUY', 'ticker': stock.ticker, 'quantity': qty, 'price': stock.price});
+
+  /// Ordre de vente : cree une transaction SELL "pending". Le serveur refuse
+  /// deja si la quantite depasse ce qui est reellement detenu (voir
+  /// _owned_quantity/create_transaction) ; le solde est credite du montant
+  /// net (frais deduits) a la validation admin.
+  static Future<void> sell(Stock stock, int qty) => Api.post(
+      '/api/transactions', {'type': 'SELL', 'ticker': stock.ticker, 'quantity': qty, 'price': stock.price});
 
   static Future<void> login(String email, String password) async {
     final res = await Api.post('/api/auth/login', {'email': email, 'password': password});
@@ -200,6 +199,14 @@ class Repo {
     await Api.post('/api/auth/register', {'name': name, 'email': email, 'password': password});
     await login(email, password);
   }
+
+  /// Meme reponse que l'email existe ou non cote serveur : ne pas se fier au
+  /// contenu pour dire a l'utilisateur "cet email n'existe pas".
+  static Future<void> requestPasswordReset(String email) =>
+      Api.post('/api/auth/request-password-reset', {'email': email});
+
+  static Future<void> resetPassword(String token, String newPassword) =>
+      Api.post('/api/auth/reset-password', {'token': token, 'newPassword': newPassword});
 
   static Future<void> updateProfile(String name, {String? whatsapp}) async {
     final body = {'firstName': name, if (whatsapp != null) 'whatsapp': whatsapp};
@@ -278,15 +285,19 @@ class AppState extends ChangeNotifier {
     final now = DateTime.now();
     for (final t in transactions) {
       if (t.status != 'validated') continue;
-      if (t.type == 'BUY' && t.ticker.isNotEmpty) {
-        final h = byTicker[t.ticker];
-        if (h == null) {
-          byTicker[t.ticker] =
-              Holding(t.ticker, t.company.isNotEmpty ? t.company : t.ticker, t.quantity, t.unitPrice);
-        } else {
+      if ((t.type == 'BUY' || t.type == 'SELL') && t.ticker.isNotEmpty) {
+        // ponytail: putIfAbsent(qty: 0) plutot que "creer seulement sur BUY"
+        // -- l'historique est trie du plus recent au plus ancien, donc une
+        // vente peut apparaitre avant l'achat correspondant dans la boucle ;
+        // le total final est correct quel que soit l'ordre de parcours.
+        final h = byTicker.putIfAbsent(
+            t.ticker, () => Holding(t.ticker, t.company.isNotEmpty ? t.company : t.ticker, 0, t.unitPrice));
+        if (t.type == 'BUY') {
           final newQty = h.quantity + t.quantity;
           h.avgPrice = ((h.avgPrice * h.quantity) + (t.unitPrice * t.quantity)) / newQty;
           h.quantity = newQty;
+        } else {
+          h.quantity -= t.quantity;
         }
       }
       if (t.type == 'DIVIDEND' || t.type == 'DIVIDENDE') dividends += t.amount;
@@ -294,7 +305,7 @@ class AppState extends ChangeNotifier {
         spentThisMonth += t.amount.abs();
       }
     }
-    holdings = byTicker.values.toList();
+    holdings = byTicker.values.where((h) => h.quantity > 0).toList();
     dividendsReceived = dividends;
     spent = spentThisMonth;
   }

@@ -681,8 +681,20 @@ def create_transaction(request, sess):
             return Response({"success": True, "data": tx.as_dict()}, status=201)
         try:
             link = jeko.create_payment_link(f"Depot BAOU - {user.name} - {int(amount)} FCFA", amount)
-        except jeko.JekoError as e:
-            return Response({"error": f"Paiement indisponible pour le moment ({e})."}, status=502)
+            payment_ref, payment_url, payment_method = link["id"], link["link"], "Jeko"
+        except jeko.JekoError:
+            # ponytail: compte Jeko pas encore active pour l'API (403
+            # business_not_enabled_for_api_access) -> repli sur le lien fixe
+            # du Cockpit (JEKO_FALLBACK_LINK) + validation manuelle admin.
+            # Un lien partage ne permet pas de correler un webhook a CE depot
+            # precis, donc payment_ref est prefixe MANUAL- pour qu'il ne
+            # matche jamais jeko_webhook ; l'admin valide a la main
+            # (Transactions > Dépôts) en recoupant montant/nom avec le
+            # Cockpit Jeko. A retirer une fois l'API activee cote Jeko : la
+            # creation de lien dynamique ci-dessus reprendra automatiquement.
+            payment_ref = f"MANUAL-{uuid.uuid4().hex[:8]}"
+            payment_url = settings.JEKO_FALLBACK_LINK
+            payment_method = "Jeko (validation manuelle)"
         tx = Transaction.objects.create(
             id=str(uuid.uuid4()),
             user=user,
@@ -698,11 +710,11 @@ def create_transaction(request, sess):
             tva=0,
             grand_total=amount,
             status="pending",
-            payment_ref=link["id"],
-            payment_method="Jeko",
+            payment_ref=payment_ref,
+            payment_method=payment_method,
             submitted_at=now_iso(),
         )
-        return Response({"success": True, "data": tx.as_dict(), "paymentUrl": link["link"]}, status=201)
+        return Response({"success": True, "data": tx.as_dict(), "paymentUrl": payment_url}, status=201)
 
     # select_for_update : deux ordres simultanes ne doivent pas ecraser
     # le meme solde (le store Node en memoire avait ce trou).

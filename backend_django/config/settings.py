@@ -46,6 +46,13 @@ JEKO_API_KEY = os.environ.get("JEKO_API_KEY", "")
 JEKO_API_KEY_ID = os.environ.get("JEKO_API_KEY_ID", "")
 JEKO_STORE_ID = os.environ.get("JEKO_STORE_ID", "")
 JEKO_WEBHOOK_SECRET = os.environ.get("JEKO_WEBHOOK_SECRET", "")
+# Repli tant que le compte Jeko n'a pas l'acces API active (403
+# business_not_enabled_for_api_access sur /payment_links, voir views.py) :
+# lien fixe cree a la main dans le Cockpit, depot alors valide manuellement
+# par l'admin. Retire tout seul une fois l'API activee cote Jeko.
+JEKO_FALLBACK_LINK = os.environ.get(
+    "JEKO_FALLBACK_LINK", "https://pay.jeko.africa/pl/3b7524f4-5883-44c3-96fc-8e239ae1aa87"
+)
 
 INSTALLED_APPS = [
     "django.contrib.contenttypes",

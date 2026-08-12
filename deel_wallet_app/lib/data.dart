@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'api.dart';
 
 /// FCFA n'a pas de centimes en usage courant. Regroupement par espaces,

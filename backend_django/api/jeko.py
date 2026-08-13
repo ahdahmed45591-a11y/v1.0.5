@@ -43,7 +43,11 @@ def _request(method, path, payload=None):
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")
-        raise JekoError(f"{method} {path} -> {e.code}: {detail}") from e
+        # ponytail: payload envoye inclus dans l'erreur -- Jeko renvoie parfois
+        # des messages vagues ("must be at least undefined"), impossible de
+        # savoir si le bug est chez nous ou chez eux sans voir ce qu'on a
+        # vraiment envoye.
+        raise JekoError(f"{method} {path} {payload!r} -> {e.code}: {detail}") from e
     except urllib.error.URLError as e:
         raise JekoError(f"{method} {path} injoignable : {e.reason}") from e
 

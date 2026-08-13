@@ -648,6 +648,12 @@ def create_transaction(request, sess):
         # credite qu'a la confirmation du paiement (voir jeko_webhook et
         # _credit_deposit, partages avec la validation manuelle admin).
         amount = money(price)
+        if amount < 100:
+            # ponytail: minimum Jeko = 100 FCFA (amountCents >= 10000, voir
+            # jeko.py). En dessous, leur API renvoie un message d'erreur casse
+            # ("must be at least undefined") -- autant bloquer ici avec un
+            # message clair plutot que de laisser deviner.
+            return Response({"error": "Le montant minimum pour un dépôt est de 100 FCFA."}, status=400)
         if not settings.JEKO_API_KEY:
             # ponytail: aucune cle Jeko configuree (dev local sans .env.docker
             # rempli, ou CI -- voir .github/workflows/build.yml) -> repli sur

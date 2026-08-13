@@ -28,7 +28,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onLogout = () => {},
   adminProfile = {
     name: 'M. Cissé',
-    role: 'Admin Level 4',
+    role: 'Administrateur Niveau 4',
     avatar: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&auto=format&fit=crop&q=80'
   }
 }) => {

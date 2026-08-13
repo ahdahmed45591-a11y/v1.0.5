@@ -1003,6 +1003,7 @@ enum _DepositStep { starting, waiting, done, error }
 class _JekoPaymentScreenState extends State<JekoPaymentScreen> with WidgetsBindingObserver {
   _DepositStep _step = _DepositStep.starting;
   String? _txId;
+  String? _paymentMethod;
   String? _error;
   Timer? _poll;
   bool _checking = false;
@@ -1042,6 +1043,7 @@ class _JekoPaymentScreenState extends State<JekoPaymentScreen> with WidgetsBindi
       final url = res['paymentUrl'] as String?;
       if (url == null) throw ApiException('Lien de paiement indisponible.');
       _txId = tx['id'] as String?;
+      _paymentMethod = tx['paymentMethod'] as String?;
       await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
       if (!mounted) return;
       setState(() => _step = _DepositStep.waiting);
@@ -1104,6 +1106,27 @@ class _JekoPaymentScreenState extends State<JekoPaymentScreen> with WidgetsBindi
           const SizedBox(height: 8),
           Text('Une fois le paiement effectué sur la page Jèko, revenez ici.',
               textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
+          if (_paymentMethod?.contains('partagé') == true) ...[
+            const SizedBox(height: 16),
+            // ponytail: lien Jèko de secours (compte pas encore active pour
+            // l'API, voir backend) -> montant non verrouillable cote Jeko.
+            // Seul avertissement possible : demander au client de saisir le
+            // bon montant lui-meme ; jeko_webhook associe par montant.
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                border: Border.all(color: Colors.orange.shade200),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                'Important : sur la page Jèko, saisissez bien ${money(widget.amount)} exactement. '
+                'La confirmation est automatique mais se base sur ce montant : un autre montant bloquera la validation.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.orange.shade900, fontSize: 13),
+              ),
+            ),
+          ],
           const SizedBox(height: 24),
           OutlinedButton(onPressed: _check, child: const Text("J'ai payé, vérifier")),
         ]);

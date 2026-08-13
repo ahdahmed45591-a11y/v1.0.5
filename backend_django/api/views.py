@@ -685,16 +685,15 @@ def create_transaction(request, sess):
         except jeko.JekoError:
             # ponytail: compte Jeko pas encore active pour l'API (403
             # business_not_enabled_for_api_access) -> repli sur le lien fixe
-            # du Cockpit (JEKO_FALLBACK_LINK) + validation manuelle admin.
-            # Un lien partage ne permet pas de correler un webhook a CE depot
-            # precis, donc payment_ref est prefixe MANUAL- pour qu'il ne
-            # matche jamais jeko_webhook ; l'admin valide a la main
-            # (Transactions > Dépôts) en recoupant montant/nom avec le
-            # Cockpit Jeko. A retirer une fois l'API activee cote Jeko : la
-            # creation de lien dynamique ci-dessus reprendra automatiquement.
+            # du Cockpit (JEKO_FALLBACK_LINK). payment_ref prefixe MANUAL- :
+            # jeko_webhook credite quand meme automatiquement, en associant
+            # par montant (voir jeko_webhook) au lieu de payment_ref exact --
+            # plus besoin de validation admin. A retirer une fois l'API
+            # activee cote Jeko : la creation de lien dynamique ci-dessus
+            # reprendra automatiquement, avec correlation exacte par lien.
             payment_ref = f"MANUAL-{uuid.uuid4().hex[:8]}"
             payment_url = settings.JEKO_FALLBACK_LINK
-            payment_method = "Jeko (validation manuelle)"
+            payment_method = "Jeko (lien partagé)"
         tx = Transaction.objects.create(
             id=str(uuid.uuid4()),
             user=user,
@@ -832,15 +831,28 @@ def jeko_webhook(request):
         return Response({"success": True})
 
     link_id = (payload.get("transactionDetails") or {}).get("paymentLinkId")
-    if not link_id:
-        return Response({"success": True})
+    amount_xof = money((payload.get("amount") or {}).get("amount", 0) / 100)
 
     with db_transaction.atomic():
         # status="pending" dans le filtre = idempotence : un webhook rejoue
         # (retry Jeko) ne trouve plus rien a crediter la deuxieme fois.
-        tx = Transaction.objects.select_for_update().filter(
-            payment_ref=link_id, type="DEPOSIT", status="pending"
-        ).first()
+        tx = None
+        if link_id:
+            tx = Transaction.objects.select_for_update().filter(
+                payment_ref=link_id, type="DEPOSIT", status="pending"
+            ).first()
+        if not tx and amount_xof:
+            # ponytail: lien de secours partage (compte Jeko pas encore
+            # active pour l'API, voir create_transaction) -> pas de
+            # paymentLinkId par depot. Repli : on associe au plus ancien
+            # depot MANUAL- en attente du meme montant, plus d'admin requis.
+            # Ceiling : deux depots identiques + simultanes peuvent se
+            # confondre. Repasse en correlation exacte par lien des que
+            # l'API Jeko est activee (le match payment_ref ci-dessus prend
+            # le dessus automatiquement).
+            tx = Transaction.objects.select_for_update().filter(
+                type="DEPOSIT", status="pending", payment_ref__startswith="MANUAL-", total=amount_xof,
+            ).order_by("submitted_at").first()
         if not tx:
             return Response({"success": True})
         tx.status = "validated"

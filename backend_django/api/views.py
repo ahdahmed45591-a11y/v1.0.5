@@ -831,7 +831,13 @@ def jeko_webhook(request):
     Repond toujours 200 sauf signature invalide, pour eviter les retries
     Jeko sur des evenements deja traites ou qui ne nous concernent pas."""
     raw = request.body
+    # ponytail: log d'entree systematique -- seule facon de distinguer "Jeko
+    # n'appelle jamais notre URL" (rien dans les logs = mauvaise config
+    # Cockpit) de "Jeko appelle mais on rejette/ne matche pas" (code a
+    # corriger).
+    print(f"[jeko webhook] recu, {len(raw)} octets", flush=True)
     if not jeko.verify_signature(raw, request.headers.get("Jeko-Signature", "")):
+        print("[jeko webhook] signature invalide", flush=True)
         return Response({"error": "Signature invalide."}, status=401)
     try:
         payload = json.loads(raw)
@@ -872,12 +878,15 @@ def jeko_webhook(request):
                 type="DEPOSIT", status="pending", payment_ref__startswith="MANUAL-", total=amount_xof,
             ).order_by("submitted_at").first()
         if not tx:
+            print(f"[jeko webhook] aucun depot en attente ne correspond "
+                  f"(link_id={link_id!r}, amount_xof={amount_xof!r})", flush=True)
             return Response({"success": True})
         tx.status = "validated"
         tx.processed_at = now_iso()
         tx.processed_by = "JEKO_WEBHOOK"
         tx.save()
         _credit_deposit(tx)
+        print(f"[jeko webhook] depot {tx.id} credite ({tx.total} FCFA)", flush=True)
     return Response({"success": True})
 
 

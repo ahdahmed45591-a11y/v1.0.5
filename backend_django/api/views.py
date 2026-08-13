@@ -682,7 +682,12 @@ def create_transaction(request, sess):
         try:
             link = jeko.create_payment_link(f"Depot BAOU - {user.name} - {int(amount)} FCFA", amount)
             payment_ref, payment_url, payment_method = link["id"], link["link"], "Jeko"
-        except jeko.JekoError:
+        except jeko.JekoError as e:
+            # ponytail: print (pas logging) -> visible dans `docker compose
+            # logs backend` meme sans LOGGING configure / DEBUG=0. Seule facon
+            # de savoir POURQUOI ca retombe sur le lien fixe (403 API pas
+            # activee, storeId invalide, timeout reseau, etc.) sans deviner.
+            print(f"[jeko] create_payment_link a echoue, repli lien fixe : {e}", flush=True)
             # ponytail: compte Jeko pas encore active pour l'API (403
             # business_not_enabled_for_api_access) -> repli sur le lien fixe
             # du Cockpit (JEKO_FALLBACK_LINK). payment_ref prefixe MANUAL- :

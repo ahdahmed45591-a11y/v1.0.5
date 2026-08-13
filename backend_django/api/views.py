@@ -832,7 +832,14 @@ def jeko_webhook(request):
     except ValueError:
         return Response({"error": "JSON invalide."}, status=400)
 
-    if payload.get("status") != "success" or payload.get("transactionType") != "payment":
+    # ponytail: la doc prose Jeko dit transactionType == "payment", le schema
+    # OpenAPI (source de verite, cf. /partner_api/stores) montre
+    # "PaymentRequest" dans les 3 exemples de payload (redirect/soundbox/lien
+    # de paiement) -- les deux etaient acceptes ici tant que ca ne credite
+    # jamais rien de faux (status doit quand meme etre "success").
+    if payload.get("status") != "success" or payload.get("transactionType") not in ("PaymentRequest", "payment"):
+        print(f"[jeko] webhook ignore (status={payload.get('status')!r}, "
+              f"transactionType={payload.get('transactionType')!r})", flush=True)
         return Response({"success": True})
 
     link_id = (payload.get("transactionDetails") or {}).get("paymentLinkId")

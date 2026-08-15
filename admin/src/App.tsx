@@ -529,7 +529,7 @@ export default function App() {
                   required
                   value={loginEmail}
                   onChange={e => setLoginEmail(e.target.value)}
-                  placeholder="admin@elephantbourse.ci"
+                  placeholder="baoufinance@gmail.com"
                   className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/30 font-sans text-[14px] focus:outline-none focus:border-[#ff8200] focus:bg-white/15 transition-all"
                 />
               </div>

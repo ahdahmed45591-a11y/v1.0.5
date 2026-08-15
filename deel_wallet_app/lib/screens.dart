@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'api.dart';
 import 'data.dart';
+import 'legal_texts.dart';
 import 'main.dart';
 
 // ---------------------------------------------------------------- onboarding
@@ -594,7 +595,7 @@ void _infoDialog(BuildContext context, String title, String body) {
 }
 
 /// Numero WhatsApp de l'administrateur SGI (support client).
-const adminWhatsapp = '0555173322';
+const adminWhatsapp = '0545591789';
 
 /// Ouvre WhatsApp sur une conversation avec [phone] (format local 0XXXXXXXXX,
 /// converti en indicatif +225). Affiche un message d'erreur si aucune app
@@ -637,7 +638,27 @@ class HomeTab extends StatelessWidget {
                 onTap: () {
                   Navigator.pop(context);
                   _infoDialog(context, 'Aide',
-                      'Une question ? Écrivez-nous à support@baoufinance.ci');
+                      'Une question ? Écrivez-nous à baoufinance@gmail.com');
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.description_outlined),
+                title: const Text('Conditions générales'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => const LegalScreen(
+                          title: 'Conditions générales', text: cguText)));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.privacy_tip_outlined),
+                title: const Text('Politique de confidentialité'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => const LegalScreen(
+                          title: 'Politique de confidentialité', text: privacyText)));
                 },
               ),
               ListTile(
@@ -1838,6 +1859,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ],
           ),
+        ),
+      );
+}
+
+/// Ecran generique pour afficher un texte juridique long (CGU / politique de
+/// confidentialite, voir legal_texts.dart) -- evite de dupliquer un Scaffold
+/// scrollable pour chacun des deux textes.
+class LegalScreen extends StatelessWidget {
+  const LegalScreen({super.key, required this.title, required this.text});
+  final String title;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Text(text, style: const TextStyle(fontSize: 13.5, height: 1.6)),
         ),
       );
 }

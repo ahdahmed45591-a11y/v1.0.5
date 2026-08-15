@@ -25,7 +25,7 @@ const GREEN = '#16A34A';
 const GREEN_DARK = '#0F7A38'; // degrade de la carte solde, Accueil mobile
 const ORANGE = '#FF6B00';
 const DARK = '#1A1A1A';
-const ADMIN_WHATSAPP = '2250555173322';
+const ADMIN_WHATSAPP = '2250545591789';
 
 function brvmMarketStatus() {
   // Meme regle que _brvmMarketStatus() cote Flutter : 9h-15h GMT, lun-ven.
@@ -127,7 +127,7 @@ export const DashboardBaouView: React.FC<DashboardBaouViewProps> = ({
           className="bg-white/15 hover:bg-white/25 transition-colors rounded-xl px-4 py-3 flex items-center gap-2 font-sans font-bold text-[13px] shrink-0"
         >
           <MessageCircle className="w-4 h-4" />
-          WhatsApp admin (05 55 17 33 22)
+          WhatsApp admin (05 45 59 17 89)
         </a>
       </div>
 

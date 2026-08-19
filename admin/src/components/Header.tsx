@@ -28,7 +28,12 @@ export const Header: React.FC<HeaderProps> = ({
   pendingTransactionsCount = 0,
   pendingKycCount = 0,
   openTicketsCount = 0,
-  onSupportClick = () => {}
+  // ponytail: pas de valeur par defaut ici -- `= () => {}` faisait inferer a
+  // TypeScript le type union `((t?: string) => void) | (() => void)`, dont
+  // l'appel n'accepte que 0 argument : les 3 onSupportClick('TRANSACTIONS'|
+  // 'CLIENTS'|'SUPPORT') ci-dessous ne compilaient plus. Tous les appels
+  // utilisent deja `?.()`, le defaut ne servait a rien.
+  onSupportClick
 }) => {
   const [showNotifications, setShowNotifications] = React.useState(false);
   const totalNotifications = pendingTransactionsCount + pendingKycCount + openTicketsCount;

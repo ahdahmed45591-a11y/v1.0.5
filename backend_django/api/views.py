@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import uuid
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 import bcrypt
 import jwt
@@ -67,7 +68,16 @@ def now_iso():
 
 
 def money(x):
-    return round(float(x), 2)
+    """Montant FCFA arrondi au centime, en Decimal (voir MONEY dans models.py).
+    Decimal(str(x)) et pas Decimal(x) : passer un float directement conserve
+    son erreur binaire (Decimal(0.1) -> 0.1000000000000000055511151231257827)."""
+    return Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+# Frais de courtage 0,5 % + TVA 18 % sur ces frais. En Decimal : multiplier un
+# Decimal par un float leve TypeError.
+FEE_RATE = Decimal("0.005")
+TVA_RATE = Decimal("0.18")
 
 
 # ── Auth ────────────────────────────────────────────────────────────────
@@ -308,7 +318,7 @@ def register(request):
         password=hash_password(password),
         role="client",
         kyc="pending",
-        balance=0.0,
+        balance=Decimal(0),
         joined_at=now_iso(),
     )
     send_welcome_email(user)
@@ -651,8 +661,10 @@ def create_transaction(request, sess):
     kind = (d.get("type") or "BUY").upper()
     try:
         qty = int(d.get("quantity") or 1)
-        price = float(d.get("price") or 0)
-    except (TypeError, ValueError):
+        price = money(d.get("price") or 0)
+    except (TypeError, ValueError, InvalidOperation):
+        # InvalidOperation : money() passe par Decimal, qui leve ca (et pas
+        # ValueError) sur une chaine non numerique.
         return Response({"error": "Quantité et prix doivent être numériques."}, status=400)
     if qty <= 0 or price < 0:
         return Response({"error": "Quantité et prix doivent être positifs."}, status=400)
@@ -796,8 +808,8 @@ def create_transaction(request, sess):
             return Response({"error": f"Titre \"{d.get('ticker')}\" introuvable."}, status=404)
 
         total = qty * price
-        fees = total * 0.005
-        tva = fees * 0.18
+        fees = total * FEE_RATE
+        tva = fees * TVA_RATE
         grand_total = total + fees + tva
 
         if kind == "BUY" and user.balance < grand_total:
@@ -858,7 +870,7 @@ def _credit_deposit(tx):
         return
     user = User.objects.select_for_update().filter(id=tx.user_id).first()
     if user:
-        user.balance = max(0.0, money(user.balance + tx.total))
+        user.balance = max(Decimal(0), money(user.balance + tx.total))
         user.save()
 
 
@@ -915,7 +927,10 @@ def jeko_webhook(request):
         return Response({"success": True})
 
     link_id = (payload.get("transactionDetails") or {}).get("paymentLinkId")
-    amount_xof = money((payload.get("amount") or {}).get("amount", 0) / 100)
+    # Jeko envoie des centimes (entier). Division en Decimal, pas en float :
+    # le montant sert de cle de rapprochement avec un DecimalField
+    # (total=amount_xof plus bas), une erreur d'arrondi ne matcherait rien.
+    amount_xof = money(Decimal(str((payload.get("amount") or {}).get("amount", 0))) / 100)
 
     with db_transaction.atomic():
         # status="pending" dans le filtre = idempotence : un webhook rejoue

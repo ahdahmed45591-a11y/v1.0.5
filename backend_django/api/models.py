@@ -1,5 +1,11 @@
 from django.db import models
 
+# Montants en FCFA. Decimal et pas float : 0,5 % de frais + 18 % de TVA
+# produisent de vraies fractions, et l'erreur binaire du float s'accumule
+# dans les soldes a chaque operation. max_digits=14 -> jusqu'a
+# 999 999 999 999,99 FCFA, largement au-dela de tout solde realiste.
+MONEY = dict(max_digits=14, decimal_places=2, default=0)
+
 
 class User(models.Model):
     id = models.CharField(primary_key=True, max_length=64)
@@ -15,8 +21,8 @@ class User(models.Model):
     residence = models.CharField(max_length=200, blank=True, default="")
     kyc = models.CharField(max_length=20, default="pending")
     email_verified = models.BooleanField(default=False)
-    balance = models.FloatField(default=0.0)
-    portfolio_value = models.FloatField(default=0.0)
+    balance = models.DecimalField(**MONEY)
+    portfolio_value = models.DecimalField(**MONEY)
     joined_at = models.CharField(max_length=40, blank=True, default="")
     identity_doc_status = models.CharField(max_length=30, blank=True, default="")
     proof_of_address_status = models.CharField(max_length=30, blank=True, default="")
@@ -44,8 +50,11 @@ class User(models.Model):
             "residence": self.residence,
             "kyc": self.kyc,
             "emailVerified": self.email_verified,
-            "balance": self.balance,
-            "portfolioValue": self.portfolio_value,
+            # float() : le contrat JSON ne change pas (Flutter et l'admin React
+            # lisent des nombres). Seul le stockage et les calculs passent en
+            # Decimal ; la serialisation reste identique a l'octet pres.
+            "balance": float(self.balance),
+            "portfolioValue": float(self.portfolio_value),
             "joinedAt": self.joined_at,
             "identityDocStatus": self.identity_doc_status,
             "proofOfAddressStatus": self.proof_of_address_status,
@@ -68,11 +77,11 @@ class Transaction(models.Model):
     company = models.CharField(max_length=200, blank=True, default="")
     type = models.CharField(max_length=20)
     quantity = models.IntegerField(default=0)
-    price = models.FloatField(default=0.0)
-    total = models.FloatField(default=0.0)
-    fees = models.FloatField(default=0.0)
-    tva = models.FloatField(default=0.0)
-    grand_total = models.FloatField(default=0.0)
+    price = models.DecimalField(**MONEY)
+    total = models.DecimalField(**MONEY)
+    fees = models.DecimalField(**MONEY)
+    tva = models.DecimalField(**MONEY)
+    grand_total = models.DecimalField(**MONEY)
     status = models.CharField(max_length=20, default="pending")
     payment_ref = models.CharField(max_length=120, blank=True, default="")
     payment_method = models.CharField(max_length=120, blank=True, default="")
@@ -96,11 +105,12 @@ class Transaction(models.Model):
             "company": self.company,
             "type": self.type,
             "quantity": self.quantity,
-            "price": self.price,
-            "total": self.total,
-            "fees": self.fees,
-            "tva": self.tva,
-            "grandTotal": self.grand_total,
+            # float() : voir User.as_dict -- contrat JSON inchange.
+            "price": float(self.price),
+            "total": float(self.total),
+            "fees": float(self.fees),
+            "tva": float(self.tva),
+            "grandTotal": float(self.grand_total),
             "status": self.status,
             "paymentRef": self.payment_ref,
             "paymentMethod": self.payment_method,

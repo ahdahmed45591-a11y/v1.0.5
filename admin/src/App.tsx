@@ -467,6 +467,10 @@ export default function App() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
+          // ponytail: sans userId, le backend retombait sur sess["userId"] --
+          // l'operation etait creee sur le compte de l'admin connecte, jamais
+          // sur celui du client saisi dans la modale.
+          userId: clientMatch.id,
           ticker: opTicker,
           type: opType,
           quantity: qtyNum,

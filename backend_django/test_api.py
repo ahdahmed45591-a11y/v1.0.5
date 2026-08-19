@@ -307,6 +307,36 @@ def main():
     call("GET", "/api/transactions", expect=401)
     call("GET", "/api/transactions", token="nimportequoi", expect=401)
 
+    # Statut KYC invalide refuse (avant : n'importe quelle chaine passait, une
+    # faute de frappe verrouillait le client en silence et un statut trop long
+    # faisait planter Postgres).
+    call("PATCH", f"/api/admin/users/{user['id']}/kyc", {"status": "verifie"},
+         token=admin_token, expect=400)
+    call("PATCH", f"/api/admin/users/{user['id']}/kyc", {"status": "x" * 40},
+         token=admin_token, expect=400)
+    assert next(u for u in call("GET", "/api/admin/users", token=admin_token)["data"]
+                if u["id"] == user["id"])["kyc"] == "verified", "statut KYC ecrase par une valeur invalide"
+
+    # Recharge admin : l'operation doit atterrir sur le compte du CLIENT vise,
+    # pas sur celui de l'admin connecte (le champ userId etait ignore).
+    before = next(u for u in call("GET", "/api/admin/users", token=admin_token)["data"]
+                  if u["id"] == user["id"])["balance"]
+    recharge = call("POST", "/api/transactions",
+                    {"userId": user["id"], "type": "DEPOSIT", "price": 5000},
+                    token=admin_token, expect=201)["data"]
+    assert recharge["userId"] == user["id"], recharge
+    assert recharge["status"] == "validated", recharge
+    after = next(u for u in call("GET", "/api/admin/users", token=admin_token)["data"]
+                 if u["id"] == user["id"])["balance"]
+    assert after == round(before + 5000, 2), (before, after)
+
+    # ...mais un client ne peut pas se faire passer pour un autre compte.
+    usurpe = call("POST", "/api/transactions",
+                  {"userId": "CLI-nimportequoi", "type": "BUY", "ticker": "SNTS",
+                   "quantity": 1, "price": 100},
+                  token=token, expect=201)["data"]
+    assert usurpe["userId"] == user["id"], "un client a pu cibler un autre compte !"
+
     print("OK — parcours complet valide")
 
 

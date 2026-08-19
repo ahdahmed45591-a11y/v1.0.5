@@ -8,6 +8,7 @@ import base64
 import binascii
 import datetime as dt
 import functools
+import hashlib
 import json
 import os
 import uuid
@@ -20,14 +21,27 @@ from django.db import transaction as db_transaction
 from django.db.models import Sum
 from django.http import HttpResponse, HttpResponseRedirect
 from django.views.static import serve as static_serve
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, throttle_classes
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle
 
 from . import brvm, jeko
 from .models import Message, Ticket, Transaction, User
 
 JWT_SECRET = settings.JWT_SECRET
 UPLOAD_DIR = settings.UPLOAD_DIR
+
+# Seules valeurs acceptees pour User.kyc (max_length=20). "verified" est la
+# seule qui deverrouille les operations d'argent (voir create_transaction).
+KYC_STATUSES = ("pending", "verified", "rejected", "suspended")
+
+
+class AuthThrottle(AnonRateThrottle):
+    """Limite les endpoints ou deviner vaut le coup (login, reinitialisation).
+    Le throttle global est a 300/min : largement assez pour brute-forcer un
+    mot de passe. Taux dans settings.DEFAULT_THROTTLE_RATES["auth"]."""
+
+    scope = "auth"
 
 ADMIN_STATS = {
     "totalUsers": 0,
@@ -139,6 +153,7 @@ def health(request):
 
 
 @api_view(["POST"])
+@throttle_classes([AuthThrottle])
 def login(request):
     email = (request.data.get("email") or "").strip().lower()
     user = User.objects.filter(email__iexact=email).first()
@@ -206,6 +221,11 @@ def send_password_reset_email(user):
         {
             "userId": user.id,
             "purpose": "reset_password",
+            # ponytail: empreinte du mot de passe actuel -> le code devient
+            # caduc des qu'il a servi (le hash change), sans colonne ni table
+            # de jetons a stocker. Avant, le meme code marchait autant de fois
+            # qu'on voulait pendant 1 h.
+            "pw": hashlib.sha256(user.password.encode()).hexdigest()[:16],
             "exp": dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1),
         },
         JWT_SECRET,
@@ -232,6 +252,7 @@ def send_password_reset_email(user):
 
 
 @api_view(["POST"])
+@throttle_classes([AuthThrottle])
 def request_password_reset(request):
     email = (request.data.get("email") or "").strip().lower()
     user = User.objects.filter(email__iexact=email).first()
@@ -245,6 +266,7 @@ def request_password_reset(request):
 
 
 @api_view(["POST"])
+@throttle_classes([AuthThrottle])
 def reset_password(request):
     token = request.data.get("token") or ""
     new_password = request.data.get("newPassword") or ""
@@ -259,6 +281,9 @@ def reset_password(request):
     user = User.objects.filter(id=payload.get("userId")).first()
     if not user:
         return Response({"error": "Compte introuvable."}, status=404)
+    if payload.get("pw") != hashlib.sha256(user.password.encode()).hexdigest()[:16]:
+        # Code deja utilise (le mot de passe a change depuis son envoi).
+        return Response({"error": "Code déjà utilisé ou expiré."}, status=400)
     user.password = hash_password(new_password)
     user.save()
     return Response({"success": True, "message": "Mot de passe mis à jour."})
@@ -632,7 +657,13 @@ def create_transaction(request, sess):
     if qty <= 0 or price < 0:
         return Response({"error": "Quantité et prix doivent être positifs."}, status=400)
 
-    user = User.objects.filter(id=sess["userId"]).first()
+    # ponytail: un admin peut creer une operation POUR un client (modale
+    # "Nouvelle Operation" du portail). Sans ce champ, sess["userId"] etait
+    # toujours l'admin lui-meme : toute operation saisie par l'admin
+    # atterrissait sur SON compte, jamais sur celui du client vise.
+    # Reserve aux admins : un client ne peut pas cibler un autre compte.
+    for_client = sess.get("role") == "admin" and d.get("userId")
+    user = User.objects.filter(id=d["userId"] if for_client else sess["userId"]).first()
     if not user:
         return Response({"error": "Utilisateur introuvable."}, status=404)
     if user.kyc != "verified":
@@ -654,6 +685,35 @@ def create_transaction(request, sess):
             # ("must be at least undefined") -- autant bloquer ici avec un
             # message clair plutot que de laisser deviner.
             return Response({"error": "Le montant minimum pour un dépôt est de 100 FCFA."}, status=400)
+        if for_client:
+            # ponytail: recharge saisie par l'admin pour un client (especes,
+            # virement recu hors Jeko...). Rien a payer en ligne : on credite
+            # directement au lieu de renvoyer un lien Jeko que personne
+            # n'ouvrira. Trace par processed_by = l'admin qui l'a saisie.
+            with db_transaction.atomic():
+                tx = Transaction.objects.create(
+                    id=str(uuid.uuid4()),
+                    user=user,
+                    user_email=user.email,
+                    user_name=user.name,
+                    ticker="CASH",
+                    company="Recharge manuelle (admin)",
+                    type="DEPOSIT",
+                    quantity=1,
+                    price=amount,
+                    total=amount,
+                    fees=0,
+                    tva=0,
+                    grand_total=amount,
+                    status="validated",
+                    payment_ref=f"ADMIN-{uuid.uuid4().hex[:8]}",
+                    payment_method=d.get("paymentMethod") or "Recharge manuelle",
+                    submitted_at=now_iso(),
+                    processed_at=now_iso(),
+                    processed_by=sess["userId"],
+                )
+                _credit_deposit(tx)
+            return Response({"success": True, "data": tx.as_dict()}, status=201)
         if not settings.JEKO_API_KEY:
             # ponytail: aucune cle Jeko configuree (dev local sans .env.docker
             # rempli, ou CI -- voir .github/workflows/build.yml) -> repli sur
@@ -970,6 +1030,17 @@ def admin_user_kyc(request, user_id):
     user = User.objects.filter(id=user_id).first()
     if not user:
         return Response({"error": "Utilisateur introuvable."}, status=404)
-    user.kyc = request.data.get("status") or user.kyc
+    status_ = request.data.get("status")
+    if status_ not in KYC_STATUSES:
+        # ponytail: sans cette garde, n'importe quelle chaine passait. Une
+        # faute de frappe ("verifie") verrouillait le client en silence -- le
+        # verrou de create_transaction ne s'ouvre que sur "verified" exactement
+        # -- et une valeur > 20 caracteres fait planter Postgres (max_length,
+        # deja vu sur upload-document, commit 05f739b).
+        return Response(
+            {"error": f"Statut KYC invalide. Valeurs acceptées : {', '.join(KYC_STATUSES)}."},
+            status=400,
+        )
+    user.kyc = status_
     user.save()
     return Response({"success": True, "data": {"id": user.id, "name": user.name, "kyc": user.kyc}})

@@ -3,7 +3,6 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-dev-key-change-me")
 DEBUG = os.environ.get("DEBUG", "0") == "1"
 ALLOWED_HOSTS = ["*"]  # ponytail: derriere ngrok/railway, filtrage fait en amont
 
@@ -17,6 +16,11 @@ if not JWT_SECRET:
         "JWT_SECRET est absent. Renseignez-le dans .env.docker "
         "(demarrer_local.bat en genere un au premier lancement)."
     )
+# ponytail: meme regle que JWT_SECRET -- l'ancien defaut en dur
+# ("django-dev-key-change-me") partait tel quel en production. Se rabat sur
+# JWT_SECRET, deja obligatoire et deja aleatoire, plutot que d'imposer une
+# 2e variable a renseigner.
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY") or JWT_SECRET
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "/data/uploads")
 
 # Email de bienvenue (inscription) : compte Gmail du support. EMAIL_HOST_PASSWORD
@@ -88,7 +92,9 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
     "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.AnonRateThrottle"],
-    "DEFAULT_THROTTLE_RATES": {"anon": "300/min"},
+    # "auth" : login / mot de passe oublie (voir AuthThrottle dans views.py).
+    # 300/min laissait tout le loisir de brute-forcer un mot de passe.
+    "DEFAULT_THROTTLE_RATES": {"anon": "300/min", "auth": "10/min"},
     "UNAUTHENTICATED_USER": None,
 }
 
@@ -99,8 +105,20 @@ LANGUAGE_CODE = "fr-fr"
 TIME_ZONE = "UTC"
 
 
+# Origines autorisees a appeler l'API depuis un navigateur (portail admin).
+# Vide = toute origine acceptee, comportement d'origine, pratique en local.
+# En production, lister le domaine de l'admin :
+# CORS_ALLOWED_ORIGINS=https://admin.baoufinance.ci
+CORS_ALLOWED_ORIGINS = [
+    o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()
+]
+
+
 class CorsMiddleware:
-    """Meme politique que la v1.0.4 : tout est autorise en local."""
+    """Renvoie l'Origin appelante si elle est autorisee. L'app mobile n'est pas
+    concernee (pas de navigateur, donc pas de CORS) et l'auth se fait par jeton
+    Bearer, jamais par cookie : rien n'est envoye automatiquement par le
+    navigateur, ce qui limite deja la portee d'une origine tierce."""
 
     def __init__(self, get_response):
         self.get_response = get_response
@@ -112,7 +130,10 @@ class CorsMiddleware:
             response = HttpResponse(status=204)
         else:
             response = self.get_response(request)
-        response["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
+        origin = request.headers.get("Origin", "*")
+        if CORS_ALLOWED_ORIGINS and origin not in CORS_ALLOWED_ORIGINS:
+            origin = CORS_ALLOWED_ORIGINS[0]
+        response["Access-Control-Allow-Origin"] = origin
         response["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
         response["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
         response["Access-Control-Max-Age"] = "86400"

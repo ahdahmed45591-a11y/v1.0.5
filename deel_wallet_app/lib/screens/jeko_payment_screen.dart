@@ -102,7 +102,7 @@ class _JekoPaymentScreenState extends State<JekoPaymentScreen> with WidgetsBindi
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Dépôt Jèko')),
+        appBar: AppBar(title: const Text('Dépôt Mobile Money')),
         body: Padding(
           padding: const EdgeInsets.all(24),
           child: Center(child: _body(context)),
@@ -124,7 +124,7 @@ class _JekoPaymentScreenState extends State<JekoPaymentScreen> with WidgetsBindi
           Text('En attente de la confirmation du paiement de ${money(widget.amount)}…',
               textAlign: TextAlign.center),
           const SizedBox(height: 8),
-          Text('Une fois le paiement effectué sur la page Jèko, revenez ici.',
+          Text('Une fois le paiement effectué, revenez ici.',
               textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
           if (_paymentMethod?.contains('partagé') == true) ...[
             const SizedBox(height: 16),
@@ -140,7 +140,7 @@ class _JekoPaymentScreenState extends State<JekoPaymentScreen> with WidgetsBindi
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                'Important : sur la page Jèko, saisissez bien ${money(widget.amount)} exactement. '
+                'Important : sur la page de paiement, saisissez bien ${money(widget.amount)} exactement. '
                 'La confirmation est automatique mais se base sur ce montant : un autre montant bloquera la validation.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.orange.shade900, fontSize: 13),

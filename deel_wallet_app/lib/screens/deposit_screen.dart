@@ -44,7 +44,7 @@ class _DepositScreenState extends State<DepositScreen> {
                 onChanged: (_) => setState(() {}),
               ),
               const Spacer(),
-              Text('Orange Money, Wave, MTN, carte bancaire — via Jèko.',
+              Text('Orange Money, Wave, MTN, carte bancaire.',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodySmall),
               const SizedBox(height: 12),

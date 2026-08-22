@@ -176,14 +176,54 @@ def health(request):
 # ── Auth ────────────────────────────────────────────────────────────────
 
 
+def apply_lockout_tier(user, now):
+    """Palier de verrouillage progressif apres un echec de login. Fonction
+    pure (n'importe quel objet avec les 3 attributs convient, voir
+    test_lockout.py) pour rester testable sans base de donnees ni serveur."""
+    user.failed_login_attempts += 1
+    n = user.failed_login_attempts
+    if n == 5:
+        user.locked_until = now + dt.timedelta(minutes=10)
+    elif n == 10:
+        user.locked_until = now + dt.timedelta(hours=1)
+    elif n >= 15:
+        user.must_reset_password = True
+
+
 @api_view(["POST"])
 @throttle_classes([AuthThrottle])
 def login(request):
     email = (request.data.get("email") or "").strip().lower()
     raw_password = request.data.get("password")
     user = User.objects.filter(email__iexact=email).first()
+    now = dt.datetime.now(dt.timezone.utc)
+
+    # Verrouillage progressif : 5 echecs -> 10 min, 10 -> 1h, 15 -> reset
+    # obligatoire (voir forgot-password, deja en place). Le compteur ne
+    # progresse que sur un VRAI essai (voir plus bas) : tant que le compte
+    # est verrouille, on rejette avant meme de tester le mot de passe.
+    if user and user.locked_until and user.locked_until > now:
+        wait_min = int((user.locked_until - now).total_seconds() // 60) + 1
+        return Response(
+            {"success": False, "message": f"Trop de tentatives. Réessayez dans {wait_min} min."},
+            status=429,
+        )
+    if user and user.must_reset_password:
+        return Response(
+            {"success": False, "message": "Trop de tentatives échouées. Réinitialisez votre mot de passe."},
+            status=403,
+        )
+
     if not user or not check_password(raw_password, user.password):
+        if user:
+            apply_lockout_tier(user, now)
+            user.save(update_fields=["failed_login_attempts", "locked_until", "must_reset_password"])
         return Response({"success": False, "message": "Email ou mot de passe incorrect."}, status=401)
+
+    if user.failed_login_attempts:
+        user.failed_login_attempts = 0
+        user.save(update_fields=["failed_login_attempts"])
+
     # ponytail: comptes legacy importes en clair (voir check_password) --
     # bascule silencieuse en bcrypt au premier login reussi, le mot de passe
     # en clair ne survit jamais au-dela de cette requete.
@@ -316,6 +356,10 @@ def reset_password(request):
         # Code deja utilise (le mot de passe a change depuis son envoi).
         return Response({"error": "Code déjà utilisé ou expiré."}, status=400)
     user.password = hash_password(new_password)
+    # Reinitialisation = fin du verrouillage, qu'il ait ete declenche ou non.
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    user.must_reset_password = False
     user.save()
     return Response({"success": True, "message": "Mot de passe mis à jour."})
 

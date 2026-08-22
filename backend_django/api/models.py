@@ -23,6 +23,11 @@ class User(models.Model):
     email_verified = models.BooleanField(default=False)
     balance = models.DecimalField(**MONEY)
     portfolio_value = models.DecimalField(**MONEY)
+    # Verrouillage progressif du login (voir login() dans views.py) :
+    # 5 echecs -> 10 min, 10 echecs -> 1h, 15 echecs -> reset obligatoire.
+    failed_login_attempts = models.IntegerField(default=0)
+    locked_until = models.DateTimeField(null=True, blank=True)
+    must_reset_password = models.BooleanField(default=False)
     joined_at = models.CharField(max_length=40, blank=True, default="")
     identity_doc_status = models.CharField(max_length=30, blank=True, default="")
     proof_of_address_status = models.CharField(max_length=30, blank=True, default="")

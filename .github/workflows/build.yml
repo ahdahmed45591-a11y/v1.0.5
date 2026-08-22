@@ -49,6 +49,9 @@ jobs:
     - name: Check BRVM CSV Parser
       run: python backend_django/api/brvm.py
 
+    - name: Check Login Lockout Tiers
+      run: python backend_django/test_lockout.py
+
     - name: Migrate and Seed
       working-directory: backend_django
       run: |

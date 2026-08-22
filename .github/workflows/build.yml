@@ -18,7 +18,7 @@ jobs:
         env:
           POSTGRES_DB: baou
           POSTGRES_USER: baou
-          POSTGRES_PASSWORD: baou
+          POSTGRES_PASSWORD: ${{ secrets.CI_POSTGRES_PASSWORD }}
         ports: [ "5432:5432" ]
         options: >-
           --health-cmd "pg_isready -U baou"
@@ -27,7 +27,8 @@ jobs:
 
     env:
       POSTGRES_HOST: localhost
-      JWT_SECRET: secret-de-test-ci-uniquement
+      POSTGRES_PASSWORD: ${{ secrets.CI_POSTGRES_PASSWORD }}
+      JWT_SECRET: ${{ secrets.CI_JWT_SECRET }}
       BRVM_DATA_DIR: ${{ github.workspace }}/data/brvm_data
       UPLOAD_DIR: /tmp/uploads
 

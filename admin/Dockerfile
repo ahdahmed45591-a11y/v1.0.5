@@ -11,7 +11,10 @@ RUN npm install
 COPY . .
 RUN npm run build
 
-FROM nginx:alpine
+# Image nginx officielle deja configuree pour tourner en non-root (port 8080
+# au lieu de 80) -- evite d'ecrire/maintenir un adduser+chown des dossiers de
+# cache nginx a la main.
+FROM nginxinc/nginx-unprivileged:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
-EXPOSE 80
+EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]

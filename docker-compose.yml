@@ -52,7 +52,7 @@ services:
     build: ./admin
     container_name: baou_finance_admin
     ports:
-      - "3000:80"
+      - "3000:8080"
     depends_on:
       - backend
     restart: always

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Page } from '../types';
 import {
   LayoutDashboard,
@@ -9,6 +9,7 @@ import {
   HelpCircle,
   LogOut,
   TrendingUp,
+  Home,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -32,6 +33,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     avatar: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&auto=format&fit=crop&q=80'
   }
 }) => {
+  const [logoFailed, setLogoFailed] = useState(false);
   const menuItems = [
     { id: Page.Dashboard,       label: 'Tableau de bord', icon: LayoutDashboard },
     { id: Page.DashboardBaou,   label: 'Dashboard BAOU',  icon: Sparkles },
@@ -45,16 +47,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* ── Brand Logo ─────────────────────────────────── */}
       <div className="px-5 mb-8 flex items-center gap-3">
         <div className="w-11 h-11 rounded-xl bg-[#ff8200]/20 border border-[#ff8200]/30 flex items-center justify-center shadow-md overflow-hidden">
-          <img
-            src="/baou_logo.jpg"
-            alt="BAOU Logo"
-            className="w-full h-full object-cover"
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = 'none';
-              (e.target as HTMLImageElement).parentElement!.innerHTML =
-                '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="#ff8200"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22" fill="none" stroke="#ff8200" stroke-width="2"/></svg>';
-            }}
-          />
+          {logoFailed ? (
+            <Home size={24} color="#ff8200" />
+          ) : (
+            <img
+              src="/baou_logo.jpg"
+              alt="BAOU Logo"
+              className="w-full h-full object-cover"
+              onError={() => setLogoFailed(true)}
+            />
+          )}
         </div>
         <div>
           <h1 className="font-bold text-[19px] text-white leading-none tracking-tight">

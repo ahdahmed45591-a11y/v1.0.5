@@ -325,6 +325,19 @@ def register(request):
     return Response({"success": True, "user": user.as_dict()}, status=201)
 
 
+class AppRedirect(HttpResponseRedirect):
+    """Redirection vers l'application mobile (scheme baou://).
+
+    HttpResponseRedirect n'autorise que http/https/ftp et leve
+    DisallowedRedirect sur tout autre scheme -- que Django transforme en 400.
+    Le lien de confirmation envoye par email renvoyait donc "400 Bad Request"
+    au lieu d'ouvrir l'app : il n'a jamais fonctionne. On autorise le seul
+    scheme dont on a besoin (voir AndroidManifest.xml).
+    """
+
+    allowed_schemes = ["http", "https", "baou"]
+
+
 def verify_email(request):
     """Lien clique depuis l'email de bienvenue : marque l'email verifie puis
     redirige vers l'app mobile (scheme baou://, voir AndroidManifest.xml).
@@ -334,15 +347,15 @@ def verify_email(request):
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
     except jwt.PyJWTError:
-        return HttpResponseRedirect("baou://verify-email?ok=0")
+        return AppRedirect("baou://verify-email?ok=0")
     if payload.get("purpose") != "verify_email":
-        return HttpResponseRedirect("baou://verify-email?ok=0")
+        return AppRedirect("baou://verify-email?ok=0")
     user = User.objects.filter(id=payload.get("userId")).first()
     if not user:
-        return HttpResponseRedirect("baou://verify-email?ok=0")
+        return AppRedirect("baou://verify-email?ok=0")
     user.email_verified = True
     user.save()
-    return HttpResponseRedirect("baou://verify-email?ok=1")
+    return AppRedirect("baou://verify-email?ok=1")
 
 
 @api_view(["POST"])

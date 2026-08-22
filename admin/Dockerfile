@@ -17,4 +17,8 @@ RUN npm run build
 FROM nginxinc/nginx-unprivileged:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
 EXPOSE 8080
+# Deja le defaut de l'image (voir commentaire ci-dessus) -- explicite ici
+# pour que les scanners qui ne resolvent pas le USER de l'image de base ne
+# la signalent pas a tort comme "tourne en root".
+USER nginx
 CMD ["nginx", "-g", "daemon off;"]

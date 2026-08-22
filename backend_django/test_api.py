@@ -20,6 +20,9 @@ from urllib.parse import urlsplit
 
 BASE = os.environ.get("BASE", "http://localhost:3001")
 ADMIN = ("admin@elephantbourse.ci", "admin2024")
+# Signature PNG (magic bytes) + octets bidon -- suffit a passer la verif de
+# type cote serveur (_looks_like_image), pas besoin d'un vrai fichier image.
+FAKE_IMAGE = "iVBORw0KGgpmYWtlLWltYWdlLWJ5dGVz"
 
 
 def _env_docker_value(key):
@@ -142,13 +145,13 @@ def main():
     contract_text = call("GET", "/api/contract", token=token)["text"]
     assert "SGI" in contract_text and len(contract_text) > 100
     call("POST", "/api/auth/upload-document",
-         {"docType": "cni_recto", "fileName": "recto.jpg", "fileBase64": "aGVsbG8="}, token=token)
+         {"docType": "cni_recto", "fileName": "recto.jpg", "fileBase64": FAKE_IMAGE}, token=token)
     call("POST", "/api/auth/upload-document",
-         {"docType": "cni_verso", "fileName": "verso.jpg", "fileBase64": "aGVsbG8="}, token=token)
+         {"docType": "cni_verso", "fileName": "verso.jpg", "fileBase64": FAKE_IMAGE}, token=token)
     call("POST", "/api/auth/upload-document",
-         {"docType": "proof_address", "fileName": "facture.jpg", "fileBase64": "aGVsbG8="}, token=token)
+         {"docType": "proof_address", "fileName": "facture.jpg", "fileBase64": FAKE_IMAGE}, token=token)
     call("POST", "/api/auth/upload-document",
-         {"docType": "contract", "fileName": "signature.txt", "fileBase64": "aGVsbG8="}, token=token)
+         {"docType": "contract", "fileName": "signature.txt", "fileBase64": FAKE_IMAGE}, token=token)
     with_docs = next(u for u in call("GET", "/api/admin/users", token=admin_token)["data"]
                       if u["id"] == user["id"])
     assert with_docs["identityDocStatus"] == "Reçu - à vérifier", with_docs
@@ -292,7 +295,7 @@ def main():
     call("PATCH", f"/api/admin/users/{user['id']}/kyc", {"status": "verified"}, token=admin_token)
     call("POST", "/api/auth/update-profile", {"whatsapp": "+2250700000000"}, token=token)
     call("POST", "/api/auth/upload-document",
-         {"docType": "selfie", "fileName": "s.png", "fileBase64": "aGVsbG8="}, token=token)
+         {"docType": "selfie", "fileName": "s.png", "fileBase64": FAKE_IMAGE}, token=token)
     call("POST", "/api/auth/upload-document",
          {"docType": "selfie", "fileName": "s.png", "fileBase64": "pas du base64 !!"},
          token=token, expect=400)

@@ -29,6 +29,25 @@ services:
         condition: service_healthy
     restart: always
 
+  db-backup:
+    # pg_dump quotidien + rotation, prêt à l'emploi -- pas de script cron
+    # maison à écrire/maintenir pour ça.
+    image: prodrigestivill/postgres-backup-local:16-alpine
+    container_name: baou_finance_db_backup
+    env_file: [.env.docker]
+    environment:
+      POSTGRES_HOST: db
+      SCHEDULE: "@daily"
+      BACKUP_KEEP_DAYS: 7
+      BACKUP_KEEP_WEEKS: 4
+      BACKUP_KEEP_MONTHS: 6
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: always
+
   admin:
     build: ./admin
     container_name: baou_finance_admin

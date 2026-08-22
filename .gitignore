@@ -23,5 +23,8 @@ __pycache__/
 # Pieces KYC uploadees par les clients (donnees, pas du code)
 data/uploads/
 
+# Dumps de sauvegarde Postgres (donnees, pas du code -- voir db-backup)
+backups/
+
 # Documents juridiques prives (associes, pas de code)
 contrat_repartition_droits_BAOU.pdf

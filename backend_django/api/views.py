@@ -131,6 +131,20 @@ def hash_password(raw):
     return bcrypt.hashpw(raw.encode(), bcrypt.gensalt(10)).decode()
 
 
+# Signatures binaires (magic bytes) des seuls types acceptes en upload KYC :
+# photos (camera, image_picker) et signature (canvas -> PNG). Verifie le
+# contenu reel, pas l'extension du nom de fichier -- un .jpg peut sinon
+# cacher n'importe quoi.
+_IMAGE_SIGNATURES = (
+    b"\xff\xd8\xff",  # JPEG
+    b"\x89PNG\r\n\x1a\n",  # PNG
+)
+
+
+def _looks_like_image(blob):
+    return blob.startswith(_IMAGE_SIGNATURES)
+
+
 # ── Racine & health ─────────────────────────────────────────────────────
 
 
@@ -166,9 +180,16 @@ def health(request):
 @throttle_classes([AuthThrottle])
 def login(request):
     email = (request.data.get("email") or "").strip().lower()
+    raw_password = request.data.get("password")
     user = User.objects.filter(email__iexact=email).first()
-    if not user or not check_password(request.data.get("password"), user.password):
+    if not user or not check_password(raw_password, user.password):
         return Response({"success": False, "message": "Email ou mot de passe incorrect."}, status=401)
+    # ponytail: comptes legacy importes en clair (voir check_password) --
+    # bascule silencieuse en bcrypt au premier login reussi, le mot de passe
+    # en clair ne survit jamais au-dela de cette requete.
+    if not user.password.startswith("$2"):
+        user.password = hash_password(raw_password)
+        user.save(update_fields=["password"])
 
     token = jwt.encode(
         {
@@ -521,6 +542,8 @@ def upload_document(request):
             return Response({"error": "Fichier base64 invalide."}, status=400)
         if len(blob) > 15 * 1024 * 1024:
             return Response({"error": "Fichier trop volumineux (15 Mo maximum)."}, status=413)
+        if not _looks_like_image(blob):
+            return Response({"error": "Fichier invalide : seules les images JPEG/PNG sont acceptées."}, status=400)
         safe = f"{user.id}_{doc_type}_{os.path.basename(file_name)}".replace("/", "_")
         os.makedirs(UPLOAD_DIR, exist_ok=True)
         with open(os.path.join(UPLOAD_DIR, safe), "wb") as fh:

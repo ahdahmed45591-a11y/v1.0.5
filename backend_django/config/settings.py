@@ -112,6 +112,15 @@ TIME_ZONE = "UTC"
 CORS_ALLOWED_ORIGINS = [
     o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()
 ]
+if not DEBUG and not CORS_ALLOWED_ORIGINS:
+    # ponytail: pas de hard-fail (l'app mobile n'a pas besoin de CORS, elle
+    # n'envoie pas d'Origin) -- juste un avertissement visible dans les logs
+    # tant que le domaine de l'admin n'est pas renseigne.
+    print(
+        "[config] ATTENTION : CORS_ALLOWED_ORIGINS vide en production -- "
+        "toute origine est acceptee. Renseignez le domaine de l'admin.",
+        flush=True,
+    )
 
 
 class CorsMiddleware:

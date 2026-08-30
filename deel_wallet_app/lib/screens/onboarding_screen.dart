@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../main.dart';
 import 'login_screen.dart';
@@ -28,11 +29,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     super.dispose();
   }
 
-  void _next() => _i == _slides.length - 1
-      ? Navigator.pushReplacement(
-          context, MaterialPageRoute(builder: (_) => const LoginScreen()))
-      : _pc.nextPage(
+  Future<void> _next() async {
+    if (_i != _slides.length - 1) {
+      _pc.nextPage(
           duration: const Duration(milliseconds: 280), curve: Curves.easeOut);
+      return;
+    }
+    (await SharedPreferences.getInstance()).setBool(onboardingSeenKey, true);
+    if (!mounted) return;
+    Navigator.pushReplacement(
+        context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(

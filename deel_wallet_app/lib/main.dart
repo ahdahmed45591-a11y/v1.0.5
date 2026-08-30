@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api.dart';
 import 'screens.dart';
@@ -7,6 +8,10 @@ import 'screens.dart';
 const brandOrange = Color(0xFFFF6B00);
 const brandGreen = Color(0xFF16A34A);
 const brandDark = Color(0xFF1A1A1A);
+
+// Onboarding (3 slides) affiche seulement au tout premier lancement -- voir
+// onboarding_screen.dart, qui pose ce flag une fois la derniere slide passee.
+const onboardingSeenKey = 'onboarding_seen';
 
 final theme = ThemeData(
   useMaterial3: true,
@@ -49,18 +54,21 @@ final theme = ThemeData(
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Api.loadSettings();
-  runApp(const BaouFinanceApp());
+  final prefs = await SharedPreferences.getInstance();
+  final seenOnboarding = prefs.getBool(onboardingSeenKey) ?? false;
+  runApp(BaouFinanceApp(seenOnboarding: seenOnboarding));
 }
 
 class BaouFinanceApp extends StatelessWidget {
-  const BaouFinanceApp({super.key});
+  const BaouFinanceApp({super.key, required this.seenOnboarding});
+  final bool seenOnboarding;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
         title: 'BAOU',
         debugShowCheckedModeBanner: false,
         theme: theme,
-        home: const OnboardingScreen(),
+        home: seenOnboarding ? const LoginScreen() : const OnboardingScreen(),
       );
 }
 

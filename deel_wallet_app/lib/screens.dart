@@ -21,7 +21,6 @@ export 'screens/profile_tab.dart';
 export 'screens/register_screen.dart';
 export 'screens/sell_holdings_screen.dart';
 export 'screens/sell_stock_screen.dart';
-export 'screens/settings_screen.dart';
 export 'screens/shell.dart';
 export 'screens/signature_pad.dart';
 export 'screens/stock_detail_screen.dart';

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'api.dart';
 import 'screens.dart';
 
 // Orange, blanc, vert.
@@ -53,7 +52,6 @@ final theme = ThemeData(
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Api.loadSettings();
   final prefs = await SharedPreferences.getInstance();
   final seenOnboarding = prefs.getBool(onboardingSeenKey) ?? false;
   runApp(BaouFinanceApp(seenOnboarding: seenOnboarding));

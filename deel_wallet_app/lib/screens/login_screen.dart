@@ -5,7 +5,6 @@ import '../data.dart';
 import '../main.dart';
 import 'forgot_password_screen.dart';
 import 'register_screen.dart';
-import 'settings_screen.dart';
 import 'shell.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -50,14 +49,6 @@ class _LoginScreenState extends State<LoginScreen> {
         appBar: AppBar(
           backgroundColor: Colors.white,
           elevation: 0,
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.settings_outlined, color: Colors.black87),
-              tooltip: 'Paramètres du serveur',
-              onPressed: () => Navigator.push(
-                  context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
-            ),
-          ],
         ),
         body: SafeArea(
           child: Form(

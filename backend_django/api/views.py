@@ -216,13 +216,20 @@ def audit(request, action, target_id="", actor_id=None, actor_role=None, **detai
 
 @api_view(["GET"])
 def root(request):
-    return Response({
-        "name": "🐘 Éléphant Bourse REST API Gateway",
-        "architecture": "Django 5 + DRF + PostgreSQL 16",
-        "version": "1.0.5",
-        "status": "running",
-        "market": "BRVM — Côte d'Ivoire",
-    })
+    # ponytail: leurre -- la racine renvoyait un JSON "Django 5 + DRF +
+    # PostgreSQL 16" qui identifiait la stack au premier scan. Une page
+    # statique sans script ni lien vers /api ne revele plus rien ; les vrais
+    # clients (mobile, admin) appellent /api/... directement, jamais via un
+    # lien decouvert sur cette page. Ne bloque aucun acces reel a l'API --
+    # juste une facade en amont, pas un controle d'acces.
+    html = (
+        "<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\">"
+        "<title>BAOU Finance</title></head>"
+        "<body style=\"font-family:sans-serif;text-align:center;padding:4rem\">"
+        "<h1>BAOU Finance</h1><p>Site en construction.</p>"
+        "</body></html>"
+    )
+    return HttpResponse(html, content_type="text/html; charset=utf-8")
 
 
 @api_view(["GET"])

@@ -94,7 +94,13 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.AnonRateThrottle"],
     # "auth" : login / mot de passe oublie (voir AuthThrottle dans views.py).
     # 300/min laissait tout le loisir de brute-forcer un mot de passe.
-    "DEFAULT_THROTTLE_RATES": {"anon": "300/min", "auth": "10/min"},
+    # "payments" : creation d'ordres et de depots (voir PaymentThrottle),
+    # compte par COMPTE et non par IP. 40/min laisse passer un usage humain
+    # meme nerveux et coupe court a un script qui inonde le carnet d'ordres.
+    # ponytail: cale sur test_api.py, qui enchaine ~14 creations d'ordres en
+    # quelques secondes sur un seul compte. A 20/min le test passait de
+    # justesse et echouait s'il etait relance dans la meme minute.
+    "DEFAULT_THROTTLE_RATES": {"anon": "300/min", "auth": "10/min", "payments": "40/min"},
     "UNAUTHENTICATED_USER": None,
 }
 

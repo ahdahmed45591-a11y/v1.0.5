@@ -6,9 +6,11 @@ l'app Android et l'admin React ne sont pas modifies.
 
 import base64
 import binascii
+import csv
 import datetime as dt
 import functools
 import hashlib
+import io
 import json
 import os
 import uuid
@@ -18,16 +20,17 @@ import bcrypt
 import jwt
 from django.conf import settings
 from django.core.mail import send_mail
+from django.db import IntegrityError
 from django.db import transaction as db_transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.http import HttpResponse, HttpResponseRedirect
 from django.views.static import serve as static_serve
 from rest_framework.decorators import api_view, throttle_classes
 from rest_framework.response import Response
-from rest_framework.throttling import AnonRateThrottle
+from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle
 
 from . import brvm, jeko
-from .models import Message, Ticket, Transaction, User
+from .models import AuditLog, LedgerEntry, Message, Ticket, Transaction, User
 
 JWT_SECRET = settings.JWT_SECRET
 UPLOAD_DIR = settings.UPLOAD_DIR
@@ -43,6 +46,39 @@ class AuthThrottle(AnonRateThrottle):
     mot de passe. Taux dans settings.DEFAULT_THROTTLE_RATES["auth"]."""
 
     scope = "auth"
+
+
+class PaymentThrottle(SimpleRateThrottle):
+    """Limite les operations d'argent, comptees PAR COMPTE et non par IP.
+
+    Par IP serait faux ici : en Afrique de l'Ouest les clients mobiles
+    partagent massivement les IP de sortie de leur operateur (NAT), donc un
+    quota par IP punirait des clients innocents tout en laissant un attaquant
+    changer de reseau pour se reinitialiser.
+
+    ponytail: le compteur vit dans le cache Django, par defaut LocMemCache,
+    donc par processus gunicorn -- avec 2 workers la limite reelle est
+    doublee. Meme ceiling que AuthThrottle. Basculer le cache sur Redis quand
+    l'infra de production sera fixee, sans toucher a ce code.
+    """
+
+    scope = "payments"
+
+    def allow_request(self, request, view):
+        # La vue transactions() sert aussi la consultation (GET) : limiter la
+        # lecture a 20/min casserait le rafraichissement d'ecran pour rien.
+        # Seule la creation consomme le quota.
+        if request.method != "POST":
+            return True
+        return super().allow_request(request, view)
+
+    def get_cache_key(self, request, view):
+        # session_of() decode deja le JWT depuis l'en-tete Authorization.
+        # Le throttle DRF tourne avant require_auth, donc request.session_data
+        # n'existe pas encore ici : on relit la session nous-memes.
+        sess = session_of(request)
+        ident = sess.get("userId") if sess else self.get_ident(request)
+        return self.cache_format % {"scope": self.scope, "ident": ident}
 
 ADMIN_STATS = {
     "totalUsers": 0,
@@ -148,6 +184,36 @@ def _looks_like_image(blob):
 # ── Racine & health ─────────────────────────────────────────────────────
 
 
+def client_ip(request):
+    # ponytail: X-Forwarded-For est falsifiable si le backend est joignable
+    # sans passer par le proxy. Derriere ngrok/railway c'est le seul moyen
+    # d'avoir l'IP reelle. A remplacer par la liste d'IP de confiance du
+    # reverse proxy quand l'infra de production sera fixee.
+    fwd = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    return (fwd.split(",")[0] if fwd else request.META.get("REMOTE_ADDR", "")).strip()[:64]
+
+
+def audit(request, action, target_id="", actor_id=None, actor_role=None, **details):
+    """Journalise une action sensible non financiere. Voir AuditLog.
+
+    Ne leve jamais : un journal qui plante ne doit pas casser l'operation
+    qu'il observe. Une ecriture perdue se voit au controle (trou dans la
+    sequence), une transaction perdue se voit sur le compte du client.
+    """
+    sess = getattr(request, "session_data", None) or {}
+    try:
+        AuditLog.objects.create(
+            actor_id=actor_id or sess.get("userId") or "ANONYME",
+            actor_role=actor_role or sess.get("role") or "",
+            action=action,
+            target_id=target_id or sess.get("userId") or "",
+            details=details,
+            ip=client_ip(request),
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"[audit] ecriture du journal echouee ({action}) : {e}", flush=True)
+
+
 @api_view(["GET"])
 def root(request):
     return Response({
@@ -218,6 +284,9 @@ def login(request):
         if user:
             apply_lockout_tier(user, now)
             user.save(update_fields=["failed_login_attempts", "locked_until", "must_reset_password"])
+        audit(request, "login.failed", target_id=user.id if user else "",
+              actor_id=user.id if user else "ANONYME",
+              email=email, attempts=user.failed_login_attempts if user else 0)
         return Response({"success": False, "message": "Email ou mot de passe incorrect."}, status=401)
 
     if user.failed_login_attempts:
@@ -242,6 +311,8 @@ def login(request):
         JWT_SECRET,
         algorithm="HS256",
     )
+    audit(request, "login.success", target_id=user.id, actor_id=user.id,
+          actor_role=user.role, email=user.email)
     return Response({"success": True, "token": token, "user": user.as_dict()})
 
 
@@ -361,6 +432,8 @@ def reset_password(request):
     user.locked_until = None
     user.must_reset_password = False
     user.save()
+    audit(request, "password.reset", target_id=user.id, actor_id=user.id,
+          actor_role=user.role, email=user.email)
     return Response({"success": True, "message": "Mot de passe mis à jour."})
 
 
@@ -618,6 +691,8 @@ def upload_document(request):
         user.kyc = "pending"
 
     user.save()
+    audit(request, "kyc.upload", target_id=user.id, docType=doc_type,
+          fileName=file_name, bytes=len(blob) if payload else 0)
     return Response({"success": True, "message": f'Document "{doc_type}" reçu avec succès.', "user": user.as_dict()})
 
 
@@ -703,6 +778,7 @@ def stock_detail(request, ticker):
 
 
 @api_view(["GET", "POST"])
+@throttle_classes([PaymentThrottle])
 @require_auth()
 def transactions(request):
     sess = request.session_data
@@ -763,6 +839,22 @@ def create_transaction(request, sess):
             {"error": "Compte verrouille : dossier KYC et contrat SGI a valider avant toute operation."},
             status=403,
         )
+
+    # Idempotence : le client envoie une cle (UUID genere au moment du clic)
+    # dans l'en-tete Idempotency-Key. Si la meme cle revient -- reseau mobile
+    # coupe avant la reponse, double-tap, retry automatique -- on renvoie
+    # l'ordre deja cree au lieu d'en creer un second. Sans cle, comportement
+    # inchange (clients pas encore a jour).
+    # ponytail: la contrainte unique en base (uniq_tx_idempotency_per_user)
+    # est le vrai garde-fou ; ce SELECT n'est qu'un raccourci pour repondre
+    # proprement. Deux requetes exactement simultanees passent toutes deux
+    # ici, et c'est la base qui rejette la seconde a l'INSERT (voir le
+    # IntegrityError plus bas).
+    idem_key = (request.headers.get("Idempotency-Key") or "").strip()[:64]
+    if idem_key:
+        existing = Transaction.objects.filter(user=user, idempotency_key=idem_key).first()
+        if existing:
+            return Response({"success": True, "data": existing.as_dict(), "replayed": True}, status=200)
 
     if kind in ("DEPOSIT", "RECHARGE"):
         # Paiement reel via Jeko (voir jeko.py) : plus de credit instantane
@@ -834,8 +926,7 @@ def create_transaction(request, sess):
                 processed_at=now_iso(),
                 processed_by="SYSTEM",
             )
-            user.balance = money(user.balance + amount)
-            user.save()
+            apply_balance(user, amount, "Dépôt simulé (Jeko non configuré)", tx)
             return Response({"success": True, "data": tx.as_dict()}, status=201)
         try:
             link = jeko.create_payment_link(f"Depot BAOU - {user.name} - {int(amount)} FCFA", amount)
@@ -880,64 +971,102 @@ def create_transaction(request, sess):
 
     # select_for_update : deux ordres simultanes ne doivent pas ecraser
     # le meme solde (le store Node en memoire avait ce trou).
-    with db_transaction.atomic():
-        user = User.objects.select_for_update().filter(id=user.id).first()
+    try:
+        with db_transaction.atomic():
+            user = User.objects.select_for_update().filter(id=user.id).first()
 
-        stock = brvm.find(d.get("ticker"))
-        if not stock:
-            return Response({"error": f"Titre \"{d.get('ticker')}\" introuvable."}, status=404)
+            stock = brvm.find(d.get("ticker"))
+            if not stock:
+                return Response({"error": f"Titre \"{d.get('ticker')}\" introuvable."}, status=404)
 
-        total = qty * price
-        fees = total * FEE_RATE
-        tva = fees * TVA_RATE
-        grand_total = total + fees + tva
+            total = qty * price
+            fees = total * FEE_RATE
+            tva = fees * TVA_RATE
+            grand_total = total + fees + tva
 
-        if kind == "BUY" and user.balance < grand_total:
-            return Response(
-                {"error": f"Solde insuffisant ({user.balance} FCFA dispo, {grand_total:.0f} FCFA requis)."},
-                status=400,
-            )
-        if kind == "SELL":
-            owned = _owned_quantity(user, stock["ticker"])
-            if qty > owned:
+            if kind == "BUY" and user.balance < grand_total:
                 return Response(
-                    {"error": f"Vous ne détenez que {owned} titre(s) {stock['ticker']}."},
+                    {"error": f"Solde insuffisant ({user.balance} FCFA dispo, {grand_total:.0f} FCFA requis)."},
                     status=400,
                 )
-            # Frais preleves a la vente comme a l'achat : le montant credite
-            # au solde (a la validation, cf. validate_transaction) est le net.
-            net = money(total - fees - tva)
-        else:
-            net = money(total)
+            if kind == "SELL":
+                owned = _owned_quantity(user, stock["ticker"])
+                if qty > owned:
+                    return Response(
+                        {"error": f"Vous ne détenez que {owned} titre(s) {stock['ticker']}."},
+                        status=400,
+                    )
+                # Frais preleves a la vente comme a l'achat : le montant credite
+                # au solde (a la validation, cf. validate_transaction) est le net.
+                net = money(total - fees - tva)
+            else:
+                net = money(total)
 
-        tx = Transaction.objects.create(
-            id=str(uuid.uuid4()),
-            user=user,
-            user_email=d.get("userEmail") or user.email,
-            user_name=d.get("userName") or user.name,
-            ticker=stock["ticker"],
-            company=stock["company"],
-            type=kind,
-            quantity=qty,
-            price=price,
-            total=net,
-            fees=money(fees),
-            tva=money(tva),
-            grand_total=money(grand_total) if kind != "SELL" else net,
-            status="pending",
-            payment_ref=d.get("paymentRef") or f"AUTO-{uuid.uuid4().hex[:8]}",
-            payment_method=d.get("paymentMethod") or "Non spécifié",
-            submitted_at=now_iso(),
-        )
+            tx = Transaction.objects.create(
+                id=str(uuid.uuid4()),
+                user=user,
+                user_email=d.get("userEmail") or user.email,
+                user_name=d.get("userName") or user.name,
+                ticker=stock["ticker"],
+                company=stock["company"],
+                type=kind,
+                quantity=qty,
+                price=price,
+                total=net,
+                fees=money(fees),
+                tva=money(tva),
+                grand_total=money(grand_total) if kind != "SELL" else net,
+                status="pending",
+                payment_ref=d.get("paymentRef") or f"AUTO-{uuid.uuid4().hex[:8]}",
+                payment_method=d.get("paymentMethod") or "Non spécifié",
+                submitted_at=now_iso(),
+                idempotency_key=idem_key or None,
+            )
 
-        if kind == "BUY":
-            # Gele le montant des la creation de l'ordre : sinon deux ordres
-            # "pending" successifs pouvaient chacun passer le test de solde
-            # ci-dessus et depasser ensemble le solde reel avant validation
-            # admin. Rembourse en cas de rejet (voir reject_transaction).
-            user.balance = money(user.balance - grand_total)
-            user.save()
+            if kind == "BUY":
+                # Gele le montant des la creation de l'ordre : sinon deux ordres
+                # "pending" successifs pouvaient chacun passer le test de solde
+                # ci-dessus et depasser ensemble le solde reel avant validation
+                # admin. Rembourse en cas de rejet (voir reject_transaction).
+                apply_balance(user, -grand_total, "Gel ordre BUY", tx)
+    except IntegrityError:
+        # Deux requetes exactement simultanees avec la meme cle : le SELECT
+        # d'idempotence plus haut les a toutes deux laissees passer, la base
+        # tranche a l'INSERT. Le perdant renvoie l'ordre du gagnant -- c'est
+        # le comportement attendu, pas une erreur a remonter au client.
+        existing = Transaction.objects.filter(user=user, idempotency_key=idem_key).first() if idem_key else None
+        if existing:
+            return Response({"success": True, "data": existing.as_dict(), "replayed": True}, status=200)
+        raise
     return Response({"success": True, "data": tx.as_dict()}, status=201)
+
+
+def apply_balance(user, delta, reason, tx=None):
+    """SEUL point de mutation du solde. Ecrit la ligne de journal dans le
+    meme mouvement : un solde qui bouge sans passer ici est invisible a
+    l'audit, donc interdit.
+
+    A appeler dans un bloc `db_transaction.atomic()` avec `user` deja
+    verrouille (select_for_update) -- sinon deux mouvements concurrents
+    journalisent le meme balance_before et le journal ment.
+
+    Le delta journalise est le delta REEL (after - before) : si le clamp a
+    zero mord, le journal reflete ce qui s'est passe, pas ce qui etait
+    demande.
+    """
+    before = user.balance
+    after = max(Decimal(0), money(before + delta))
+    user.balance = after
+    user.save()
+    LedgerEntry.objects.create(
+        user=user,
+        transaction=tx,
+        delta=money(after - before),
+        balance_before=before,
+        balance_after=after,
+        reason=reason,
+    )
+    return after
 
 
 def _credit_deposit(tx):
@@ -950,8 +1079,7 @@ def _credit_deposit(tx):
         return
     user = User.objects.select_for_update().filter(id=tx.user_id).first()
     if user:
-        user.balance = max(Decimal(0), money(user.balance + tx.total))
-        user.save()
+        apply_balance(user, tx.total, f"Crédit {tx.type} validé", tx)
 
 
 @api_view(["PATCH"])
@@ -969,6 +1097,8 @@ def validate_transaction(request, tx_id):
         tx.processed_by = request.session_data.get("userId") or "ADMIN"
         tx.save()
         _credit_deposit(tx)
+    audit(request, "order.validate", target_id=tx.user_id, txId=tx.id,
+          type=tx.type, amount=float(tx.grand_total))
     return Response({"success": True, "data": tx.as_dict()})
 
 
@@ -1064,12 +1194,77 @@ def reject_transaction(request, tx_id):
             # Rembourse le montant gele a la creation de l'ordre.
             user = User.objects.select_for_update().filter(id=tx.user_id).first()
             if user:
-                user.balance = money(user.balance + tx.grand_total)
-                user.save()
+                apply_balance(user, tx.grand_total, "Remboursement rejet BUY", tx)
+    audit(request, "order.reject", target_id=tx.user_id, txId=tx.id,
+          type=tx.type, reason=tx.rejection_reason)
     return Response({"success": True, "data": tx.as_dict()})
 
 
 # ── Admin ───────────────────────────────────────────────────────────────
+
+
+# Colonne du fichier -> attribut du modele. L'ordre des colonnes est celui
+# du fichier remis a la SGI ; ne pas le changer sans la prevenir, leur import
+# se cale dessus.
+EXPORT_COLUMNS = [
+    ("Reference", "id"),
+    ("Date soumission", "submitted_at"),
+    ("Date traitement", "processed_at"),
+    ("Client ID", "user_id"),
+    ("Client nom", "user_name"),
+    ("Client email", "user_email"),
+    ("Sens", "type"),
+    ("Ticker", "ticker"),
+    ("Societe", "company"),
+    ("Quantite", "quantity"),
+    ("Prix unitaire", "price"),
+    ("Montant brut", "total"),
+    ("Frais", "fees"),
+    ("TVA", "tva"),
+    ("Montant net", "grand_total"),
+    ("Statut", "status"),
+    ("Traite par", "processed_by"),
+    ("Motif rejet", "rejection_reason"),
+]
+
+
+@api_view(["GET"])
+@require_auth(admin=True)
+def admin_export_orders(request):
+    """Export CSV des ordres, format d'echange avec la SGI partenaire.
+
+    Filtres : ?from=YYYY-MM-DD &to=YYYY-MM-DD &status= &type=
+
+    ponytail: separateur « ; » et BOM UTF-8 -- le destinataire ouvre le
+    fichier dans Excel francophone, qui attend « ; » comme separateur de
+    liste et a besoin du BOM pour ne pas casser les accents. Un parseur
+    standard (pandas, csv.reader) lit ce format en precisant sep=";".
+    Passer a « , » le jour ou l'echange devient machine-a-machine.
+    """
+    rows = Transaction.objects.all()
+    if v := request.GET.get("from"):
+        rows = rows.filter(submitted_at__gte=v)
+    if v := request.GET.get("to"):
+        rows = rows.filter(submitted_at__lte=f"{v}T23:59:59")
+    if v := request.GET.get("status"):
+        rows = rows.filter(status=v)
+    if v := request.GET.get("type"):
+        rows = rows.filter(type=v.upper())
+
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+    writer.writerow([label for label, _ in EXPORT_COLUMNS])
+    count = 0
+    for tx in rows.iterator():
+        writer.writerow([getattr(tx, attr, "") or "" for _, attr in EXPORT_COLUMNS])
+        count += 1
+
+    audit(request, "orders.export", count=count,
+          filters={k: v for k, v in request.GET.items()})
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M")
+    resp = HttpResponse(buf.getvalue().encode("utf-8-sig"), content_type="text/csv; charset=utf-8")
+    resp["Content-Disposition"] = f'attachment; filename="baou-ordres-{stamp}.csv"'
+    return resp
 
 
 @api_view(["GET"])
@@ -1095,6 +1290,28 @@ def admin_users(request):
     return Response({"success": True, "count": len(rows), "data": rows})
 
 
+@api_view(["GET"])
+@require_auth(admin=True)
+def admin_audit(request):
+    """Journal des actions sensibles, du plus recent au plus ancien.
+
+    Filtres : ?userId= (acteur OU cible), ?action=, ?limit= (200 par defaut).
+    Le journal des MOUVEMENTS D'ARGENT est separe (LedgerEntry) : ici on
+    repond a « qui a fait quoi », pas a « combien a bouge ».
+    """
+    rows = AuditLog.objects.all()
+    if uid := request.GET.get("userId"):
+        rows = rows.filter(Q(actor_id=uid) | Q(target_id=uid))
+    if action := request.GET.get("action"):
+        rows = rows.filter(action=action)
+    try:
+        limit = min(int(request.GET.get("limit", 200)), 1000)
+    except ValueError:
+        limit = 200
+    rows = list(rows[:limit])
+    return Response({"success": True, "count": len(rows), "data": [r.as_dict() for r in rows]})
+
+
 @api_view(["PATCH"])
 @require_auth(admin=True)
 def admin_user_suspend(request, user_id):
@@ -1103,8 +1320,10 @@ def admin_user_suspend(request, user_id):
     user = User.objects.filter(id=user_id).first()
     if not user:
         return Response({"error": "Utilisateur introuvable."}, status=404)
+    before = user.kyc
     user.kyc = "pending" if user.kyc == "suspended" else "suspended"
     user.save()
+    audit(request, "account.suspend", target_id=user.id, before=before, after=user.kyc)
     return Response({"success": True, "data": {"id": user.id, "name": user.name, "kyc": user.kyc}})
 
 
@@ -1136,6 +1355,10 @@ def admin_user_kyc(request, user_id):
             {"error": f"Statut KYC invalide. Valeurs acceptées : {', '.join(KYC_STATUSES)}."},
             status=400,
         )
+    before = user.kyc
     user.kyc = status_
     user.save()
+    # Qui a valide le dossier de qui, quand, depuis quelle IP : c'est la
+    # question qu'un controle AMF-UMOA pose en premier sur l'entree en relation.
+    audit(request, "kyc.change", target_id=user.id, before=before, after=status_)
     return Response({"success": True, "data": {"id": user.id, "name": user.name, "kyc": user.kyc}})

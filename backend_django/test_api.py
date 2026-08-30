@@ -18,7 +18,10 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
 
-BASE = os.environ.get("BASE", "http://localhost:3001")
+BASE = os.environ.get("BASE", "http://127.0.0.1:3001")
+# ponytail: 127.0.0.1 et pas localhost -- sur Windows, "localhost" resout
+# souvent en IPv6 (::1) que Docker Desktop n'ecoute pas, d'ou un
+# RemoteDisconnected qui n'a rien a voir avec le code teste.
 ADMIN = ("admin@elephantbourse.ci", "admin2024")
 # Signature PNG (magic bytes) + octets bidon -- suffit a passer la verif de
 # type cote serveur (_looks_like_image), pas besoin d'un vrai fichier image.

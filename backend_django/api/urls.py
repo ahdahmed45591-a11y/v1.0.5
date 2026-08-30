@@ -29,6 +29,8 @@ urlpatterns = [
     path("api/transactions/<str:tx_id>/reject", views.reject_transaction),
 
     path("api/admin/stats", views.admin_stats),
+    path("api/admin/audit", views.admin_audit),
+    path("api/admin/export/orders", views.admin_export_orders),
     path("api/admin/users", views.admin_users),
     path("api/admin/users/<str:user_id>/kyc", views.admin_user_kyc),
     path("api/admin/users/<str:user_id>/suspend", views.admin_user_suspend),

@@ -94,11 +94,25 @@ class Transaction(models.Model):
     submitted_at = models.CharField(max_length=40, blank=True, default="")
     processed_at = models.CharField(max_length=40, null=True, blank=True)
     processed_by = models.CharField(max_length=64, null=True, blank=True)
+    # Cle d'idempotence fournie par le client (en-tete Idempotency-Key).
+    # Un reseau mobile qui coupe entre l'envoi et la reponse pousse l'app a
+    # rejouer la requete : sans cette cle, le client se retrouve avec deux
+    # ordres et deux fois le montant gele. Voir create_transaction.
+    idempotency_key = models.CharField(max_length=64, null=True, blank=True)
     created = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         # unshift() cote Node : le plus recent en premier.
         ordering = ["-created"]
+        constraints = [
+            # Index unique partiel : les NULL ne se genent pas entre eux, donc
+            # les ordres sans cle (clients pas encore a jour) passent toujours.
+            models.UniqueConstraint(
+                fields=["user", "idempotency_key"],
+                condition=models.Q(idempotency_key__isnull=False),
+                name="uniq_tx_idempotency_per_user",
+            )
+        ]
 
     def as_dict(self):
         return {
@@ -146,6 +160,78 @@ class Message(models.Model):
             "sender": self.sender,
             "text": self.text,
             "time": self.time,
+        }
+
+
+class LedgerEntry(models.Model):
+    """Journal immuable de TOUS les mouvements de solde (tracabilite exigee
+    par la BCEAO / l'AMF-UMOA). Ecrit par apply_balance() dans views.py, seul
+    point de mutation du solde -- si une ligne manque ici, c'est qu'un solde a
+    bouge hors du chemin officiel.
+
+    Append-only : save() refuse toute modification, et les FK sont en PROTECT
+    (on ne supprime pas un compte dont le journal financier existe encore).
+    """
+
+    user = models.ForeignKey(User, on_delete=models.PROTECT, related_name="ledger")
+    transaction = models.ForeignKey(Transaction, on_delete=models.PROTECT, null=True, blank=True)
+    delta = models.DecimalField(**MONEY)  # signe : negatif = debit
+    balance_before = models.DecimalField(**MONEY)
+    balance_after = models.DecimalField(**MONEY)
+    reason = models.CharField(max_length=60)
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created"]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValueError("LedgerEntry est append-only : modification interdite.")
+        super().save(*args, **kwargs)
+
+
+class AuditLog(models.Model):
+    """Journal immuable des actions sensibles NON financieres : connexions,
+    decisions KYC, suspensions, decisions sur les ordres, uploads.
+
+    Complementaire de LedgerEntry, qui ne couvre que l'argent. Un regulateur
+    demande les deux : « combien a bouge » (LedgerEntry) et « qui a decide
+    quoi, quand, depuis ou » (ici).
+
+    actor_id / target_id sont des CharField et non des FK : un acteur peut
+    etre "SYSTEM" (webhook, tache automatique) ou "ANONYME" (login echoue sur
+    un email inexistant), et un journal doit survivre a la suppression du
+    compte qu'il decrit.
+
+    Append-only : save() refuse toute modification.
+    """
+
+    actor_id = models.CharField(max_length=64, db_index=True)
+    actor_role = models.CharField(max_length=20, blank=True, default="")
+    action = models.CharField(max_length=40, db_index=True)  # ex: "kyc.change"
+    target_id = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    details = models.JSONField(default=dict, blank=True)
+    ip = models.CharField(max_length=64, blank=True, default="")
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created"]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValueError("AuditLog est append-only : modification interdite.")
+        super().save(*args, **kwargs)
+
+    def as_dict(self):
+        return {
+            "id": self.id,
+            "actorId": self.actor_id,
+            "actorRole": self.actor_role,
+            "action": self.action,
+            "targetId": self.target_id,
+            "details": self.details,
+            "ip": self.ip,
+            "at": self.created.isoformat(),
         }
 
 

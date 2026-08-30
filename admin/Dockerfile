@@ -9,6 +9,13 @@ COPY package*.json ./
 RUN npm install
 
 COPY . .
+# Vite integre les VITE_* dans le bundle a la compilation (pas au demarrage
+# du conteneur) -- il faut donc les faire passer en ARG de build, sinon la
+# valeur par defaut (localhost:3001) se retrouve figee dans le JS livre en
+# production. Render transmet automatiquement toute variable d'environnement
+# du service portant le meme nom qu'un ARG declare ici.
+ARG VITE_API_BASE
+ENV VITE_API_BASE=$VITE_API_BASE
 RUN npm run build
 
 # Image nginx officielle deja configuree pour tourner en non-root (port 8080

@@ -50,6 +50,11 @@ JEKO_API_KEY = os.environ.get("JEKO_API_KEY", "")
 JEKO_API_KEY_ID = os.environ.get("JEKO_API_KEY_ID", "")
 JEKO_STORE_ID = os.environ.get("JEKO_STORE_ID", "")
 JEKO_WEBHOOK_SECRET = os.environ.get("JEKO_WEBHOOK_SECRET", "")
+
+# Notifications WhatsApp/SMS clients (voir api/zavu.py). Cle depuis
+# https://dashboard.zavu.dev (Settings > API Keys). Vide = notifications
+# silencieusement desactivees, comme EMAIL_HOST_PASSWORD plus haut.
+ZAVU_API_KEY = os.environ.get("ZAVU_API_KEY", "")
 # Repli tant que le compte Jeko n'a pas l'acces API active (403
 # business_not_enabled_for_api_access sur /payment_links, voir views.py) :
 # lien fixe cree a la main dans le Cockpit, depot alors valide manuellement

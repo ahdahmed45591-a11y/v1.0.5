@@ -29,7 +29,7 @@ from rest_framework.decorators import api_view, throttle_classes
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle
 
-from . import brvm, jeko
+from . import brvm, jeko, zavu
 from .models import AuditLog, LedgerEntry, Message, Ticket, Transaction, User
 
 JWT_SECRET = settings.JWT_SECRET
@@ -38,6 +38,13 @@ UPLOAD_DIR = settings.UPLOAD_DIR
 # Seules valeurs acceptees pour User.kyc (max_length=20). "verified" est la
 # seule qui deverrouille les operations d'argent (voir create_transaction).
 KYC_STATUSES = ("pending", "verified", "rejected", "suspended")
+
+_KYC_NOTIFY_TEXT = {
+    "verified": "votre dossier KYC a été validé, vous pouvez investir sur la BRVM.",
+    "rejected": "votre dossier KYC a été rejeté. Contactez le support pour plus de détails.",
+    "suspended": "votre compte a été suspendu. Contactez le support.",
+    "pending": "votre dossier KYC est en attente de révision.",
+}
 
 
 class AuthThrottle(AnonRateThrottle):
@@ -329,8 +336,6 @@ def send_welcome_email(user):
     configure (mot de passe d'application Gmail), on n'essaie meme pas
     d'ouvrir la connexion SMTP -- une inscription ne doit jamais echouer a
     cause de l'email."""
-    if not settings.EMAIL_HOST_PASSWORD:
-        return
     verify_token = jwt.encode(
         {
             "userId": user.id,
@@ -341,6 +346,11 @@ def send_welcome_email(user):
         algorithm="HS256",
     )
     link = f"{settings.BACKEND_PUBLIC_URL}/api/auth/verify-email?token={verify_token}"
+    zavu.send(user.whatsapp,
+              f"Bienvenue sur BAOU Finance, {user.name} ! Confirmez votre "
+              "compte via le lien recu par email pour commencer a investir.")
+    if not settings.EMAIL_HOST_PASSWORD:
+        return
     try:
         send_mail(
             subject="Bienvenue sur BAOU Finance — confirmez votre compte",
@@ -364,8 +374,6 @@ def send_password_reset_email(user):
     copier-coller dans l'appli plutot qu'un lien a suivre : pas de parsing de
     deep link cote Flutter a construire pour ce flux (voir verify_email pour
     le cas ou un simple "ouvrir l'app" suffit)."""
-    if not settings.EMAIL_HOST_PASSWORD:
-        return
     token = jwt.encode(
         {
             "userId": user.id,
@@ -380,6 +388,10 @@ def send_password_reset_email(user):
         JWT_SECRET,
         algorithm="HS256",
     )
+    zavu.send(user.whatsapp,
+              f"BAOU Finance : votre code de reinitialisation (valable 1h) est {token}")
+    if not settings.EMAIL_HOST_PASSWORD:
+        return
     try:
         send_mail(
             subject="BAOU Finance — Réinitialisation de votre mot de passe",
@@ -1089,6 +1101,16 @@ def _credit_deposit(tx):
         apply_balance(user, tx.total, f"Crédit {tx.type} validé", tx)
 
 
+def _notify_tx(tx, status_text):
+    """Notification WhatsApp/SMS d'un changement de statut d'ordre (achat,
+    vente, depot) -- point commun a validate_transaction, reject_transaction
+    et jeko_webhook. Appeler hors de tout `with db_transaction.atomic()` :
+    un appel reseau ne doit jamais tenir un verrou de ligne."""
+    label = "Depot" if tx.type == "DEPOSIT" else f"{tx.type} {tx.ticker}".strip()
+    zavu.send(tx.user.whatsapp,
+              f"BAOU Finance : {label} {status_text} ({tx.grand_total} FCFA).")
+
+
 @api_view(["PATCH"])
 @require_auth(admin=True)
 def validate_transaction(request, tx_id):
@@ -1106,6 +1128,7 @@ def validate_transaction(request, tx_id):
         _credit_deposit(tx)
     audit(request, "order.validate", target_id=tx.user_id, txId=tx.id,
           type=tx.type, amount=float(tx.grand_total))
+    _notify_tx(tx, "validé")
     return Response({"success": True, "data": tx.as_dict()})
 
 
@@ -1179,6 +1202,7 @@ def jeko_webhook(request):
         tx.save()
         _credit_deposit(tx)
         print(f"[jeko webhook] depot {tx.id} credite ({tx.total} FCFA)", flush=True)
+    _notify_tx(tx, "crédité")
     return Response({"success": True})
 
 
@@ -1204,6 +1228,7 @@ def reject_transaction(request, tx_id):
                 apply_balance(user, tx.grand_total, "Remboursement rejet BUY", tx)
     audit(request, "order.reject", target_id=tx.user_id, txId=tx.id,
           type=tx.type, reason=tx.rejection_reason)
+    _notify_tx(tx, f"rejeté ({tx.rejection_reason})")
     return Response({"success": True, "data": tx.as_dict()})
 
 
@@ -1368,4 +1393,6 @@ def admin_user_kyc(request, user_id):
     # Qui a valide le dossier de qui, quand, depuis quelle IP : c'est la
     # question qu'un controle AMF-UMOA pose en premier sur l'entree en relation.
     audit(request, "kyc.change", target_id=user.id, before=before, after=status_)
+    if status_ != before:
+        zavu.send(user.whatsapp, f"BAOU Finance : {_KYC_NOTIFY_TEXT[status_]}")
     return Response({"success": True, "data": {"id": user.id, "name": user.name, "kyc": user.kyc}})

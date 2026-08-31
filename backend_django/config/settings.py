@@ -35,6 +35,13 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "dramancis40@gmail.com")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = f"BAOU Finance <{EMAIL_HOST_USER}>"
+# ponytail: sans timeout, un SMTP sortant bloque (Render bloque parfois le
+# port 587) jusqu'a ce que gunicorn tue le worker par timeout (~30s) -- vu en
+# prod (Dockerfile: --workers 3) : ce crash pendant /api/auth/register
+# immobilisait un worker sur 3 pendant ~30s a chaque inscription. send_welcome_email
+# et send_password_reset_email catchent deja Exception -- ce timeout suffit a
+# echouer vite au lieu de pendre.
+EMAIL_TIMEOUT = 10
 
 # URL publique du backend (ngrok ou domaine reel) utilisee pour construire le
 # lien de confirmation dans l'email -- doit etre a jour dans .env.docker,

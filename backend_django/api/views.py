@@ -1120,6 +1120,15 @@ def validate_transaction(request, tx_id):
             return Response({"error": "Transaction introuvable."}, status=404)
         if tx.status != "pending":
             return Response({"error": f'Transaction déjà "{tx.status}".'}, status=400)
+        if tx.type == "DEPOSIT":
+            # ponytail: un depot n'est credite que sur confirmation Jeko
+            # (jeko_webhook). Valider a la main ici creditait le solde sans
+            # qu'aucun argent soit entre -- garde-fou cote serveur, l'admin
+            # n'a plus le bouton mais l'API restait ouverte.
+            return Response(
+                {"error": "Les dépôts sont crédités automatiquement à la confirmation du paiement."},
+                status=400,
+            )
 
         tx.status = "validated"
         tx.processed_at = now_iso()

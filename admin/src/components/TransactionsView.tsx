@@ -406,15 +406,19 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
               </div>
             </div>
 
-            {/* Bottom Actions footer with double verification safeguard warning */}
+            {/* Bottom Actions footer with double verification safeguard warning.
+                Un dépôt est crédité automatiquement par le webhook Jèko : pas de
+                validation manuelle (le backend la refuse aussi), lecture seule. */}
             <div className="bg-[#f8f9ff] border border-[#dec1af]/30 rounded-xl p-5 flex flex-col md:flex-row gap-4 items-center justify-between">
               <div className="flex items-center gap-3">
                 <Info className="text-[#574235]/60 w-5 h-5 shrink-0" />
                 <p className="font-sans text-[13px] text-[#574235]/80 leading-relaxed max-w-md">
-                  En validant cette transaction, vous confirmez officiellement la réception des fonds et autorisez l'exécution de l'ordre de bourse par nos courtiers partenaires.
+                  {selectedTransaction.type === 'DEPOSIT'
+                    ? "Dépôt Jèko : le solde est crédité automatiquement dès la confirmation du paiement. Aucune action requise, cette fiche est en lecture seule."
+                    : "En validant cette transaction, vous confirmez officiellement la réception des fonds et autorisez l'exécution de l'ordre de bourse par nos courtiers partenaires."}
                 </p>
               </div>
-              <div className="flex gap-3 w-full md:w-auto shrink-0">
+              <div className={`gap-3 w-full md:w-auto shrink-0 ${selectedTransaction.type === 'DEPOSIT' ? 'hidden' : 'flex'}`}>
                 <button 
                   onClick={() => setShowRejectionModal(true)}
                   className="flex-1 md:flex-none px-6 py-2.5 bg-white border border-[#ba1a1a] text-[#ba1a1a] font-sans font-bold text-[13px] rounded-lg hover:bg-red-50 active:scale-95 transition-all flex items-center justify-center gap-2"
@@ -647,7 +651,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                     </td>
                     {/* Action button */}
                     <td className="px-6 py-4 text-center" onClick={(e) => e.stopPropagation()}>
-                      {tx.status === 'PENDING' ? (
+                      {tx.status === 'PENDING' && tx.type !== 'DEPOSIT' ? (
                         <button 
                           onClick={() => setSelectedTransaction(tx)}
                           className="bg-[#ff8200] hover:bg-[#ff8200]/95 text-white px-4 py-1.5 rounded-lg font-sans font-bold text-[12px] shadow-sm active:scale-95 transition-all"

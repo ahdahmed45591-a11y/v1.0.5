@@ -17,13 +17,6 @@ import urllib.request
 from django.conf import settings
 
 API_BASE = "https://api.jeko.africa/partner_api"
-# Deep link de l'app mobile (AndroidManifest : scheme "baou"). Jeko y renvoie
-# le client apres paiement, ce qui rouvre l'application au lieu de le laisser
-# sur pay.jeko.africa.
-DEEP_LINK = "baou://depot"
-# Reseaux acceptes par Jeko (champ paymentMethod). Liste fermee : une valeur
-# inconnue part en 422 chez eux, autant refuser avant l'appel reseau.
-METHODS = ("orange", "wave", "mtn", "moov", "djamo")
 
 
 class JekoError(Exception):
@@ -69,28 +62,6 @@ def create_payment_link(title, amount_xof):
         "amountCents": round(amount_xof * 100),
         "currency": "XOF",
         "allowMultiplePayments": False,
-    })
-
-
-def create_payment_request(amount_xof, method, reference):
-    """Demande de paiement avec redirection : le moyen de paiement est choisi
-    dans l'app (voir deposit_screen.dart), donc le montant ET le reseau sont
-    verrouilles, et Jeko renvoie le client sur `successUrl` -- un deep link
-    `baou://` qui rouvre l'application (voir AndroidManifest). C'est la seule
-    forme qui accepte une URL de retour : /payment_links n'en prend pas."""
-    return _request("POST", "/payment_requests", {
-        "storeId": settings.JEKO_STORE_ID,
-        "amountCents": round(amount_xof * 100),
-        "currency": "XOF",
-        "reference": reference,
-        "paymentDetails": {
-            "type": "redirect",
-            "data": {
-                "paymentMethod": method,
-                "successUrl": f"{DEEP_LINK}/ok",
-                "errorUrl": f"{DEEP_LINK}/echec",
-            },
-        },
     })
 
 

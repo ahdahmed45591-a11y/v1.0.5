@@ -173,12 +173,8 @@ class Repo {
   /// a ouvrir). Le solde n'est credite qu'a la confirmation reelle du
   /// paiement (webhook Jeko, voir jeko_webhook cote backend) — plus de
   /// credit instantane non verifie.
-  /// `method` = reseau choisi dans l'app (orange/wave/mtn/moov/djamo) : il
-  /// verrouille le moyen de paiement cote Jeko et permet le retour
-  /// automatique dans l'application apres paiement (deep link baou://).
-  static Future<Map<String, dynamic>> initDeposit(double amount, String method) =>
-      Api.post('/api/transactions',
-          {'type': 'DEPOSIT', 'price': amount, 'paymentMethod': method});
+  static Future<Map<String, dynamic>> initDeposit(double amount) =>
+      Api.post('/api/transactions', {'type': 'DEPOSIT', 'price': amount});
 
   /// Ordre d'achat : cree une transaction BUY "pending". Le solde n'est
   /// debite qu'a la validation admin (voir validate_transaction) — le

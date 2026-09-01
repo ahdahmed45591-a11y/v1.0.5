@@ -947,9 +947,21 @@ def create_transaction(request, sess):
             )
             apply_balance(user, amount, "Dépôt simulé (Jeko non configuré)", tx)
             return Response({"success": True, "data": tx.as_dict()}, status=201)
+        method = (d.get("paymentMethod") or "").strip().lower()
+        if method and method not in jeko.METHODS:
+            return Response({"error": "Moyen de paiement inconnu."}, status=400)
         try:
-            link = jeko.create_payment_link(f"Depot BAOU - {user.name} - {int(amount)} FCFA", amount)
-            payment_ref, payment_url, payment_method = link["id"], link["link"], "Jeko"
+            if method:
+                # ponytail: reseau choisi dans l'app -> demande de paiement
+                # avec redirection, la seule forme qui ramene le client dans
+                # l'application apres paiement (voir create_payment_request).
+                ref = f"BAOU-{uuid.uuid4().hex[:12]}"
+                pr = jeko.create_payment_request(amount, method, ref)
+                payment_ref, payment_url = pr["id"], pr["redirectUrl"]
+                payment_method = f"Jeko ({method})"
+            else:
+                link = jeko.create_payment_link(f"Depot BAOU - {user.name} - {int(amount)} FCFA", amount)
+                payment_ref, payment_url, payment_method = link["id"], link["link"], "Jeko"
         except jeko.JekoError as e:
             # ponytail: print (pas logging) -> visible dans `docker compose
             # logs backend` meme sans LOGGING configure / DEBUG=0. Seule facon
@@ -1175,7 +1187,13 @@ def jeko_webhook(request):
               f"transactionType={payload.get('transactionType')!r})", flush=True)
         return Response({"success": True})
 
-    link_id = (payload.get("transactionDetails") or {}).get("paymentLinkId")
+    # ponytail: Jeko nomme l'identifiant selon le type de paiement --
+    # paymentLinkId pour un lien, paymentRequestId pour une demande (voir
+    # create_payment_request). On accepte les deux plutot que de parier sur
+    # un nom : payment_ref ne contient de toute facon qu'un seul de ces id.
+    details = payload.get("transactionDetails") or {}
+    ref_ids = [v for v in (details.get("paymentLinkId"), details.get("paymentRequestId"),
+                           details.get("id"), payload.get("reference")) if v]
     # Jeko envoie des centimes (entier). Division en Decimal, pas en float :
     # le montant sert de cle de rapprochement avec un DecimalField
     # (total=amount_xof plus bas), une erreur d'arrondi ne matcherait rien.
@@ -1185,9 +1203,9 @@ def jeko_webhook(request):
         # status="pending" dans le filtre = idempotence : un webhook rejoue
         # (retry Jeko) ne trouve plus rien a crediter la deuxieme fois.
         tx = None
-        if link_id:
+        if ref_ids:
             tx = Transaction.objects.select_for_update().filter(
-                payment_ref=link_id, type="DEPOSIT", status="pending"
+                payment_ref__in=ref_ids, type="DEPOSIT", status="pending"
             ).first()
         if not tx and amount_xof:
             # ponytail: lien de secours partage (compte Jeko pas encore
@@ -1203,7 +1221,7 @@ def jeko_webhook(request):
             ).order_by("submitted_at").first()
         if not tx:
             print(f"[jeko webhook] aucun depot en attente ne correspond "
-                  f"(link_id={link_id!r}, amount_xof={amount_xof!r})", flush=True)
+                  f"(ref_ids={ref_ids!r}, amount_xof={amount_xof!r})", flush=True)
             return Response({"success": True})
         tx.status = "validated"
         tx.processed_at = now_iso()

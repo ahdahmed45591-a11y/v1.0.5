@@ -12,8 +12,9 @@ import '../main.dart';
 /// periodique + verification immediate au retour dans l'application (voir
 /// didChangeAppLifecycleState, c'est le "retour dans l'app" apres paiement).
 class JekoPaymentScreen extends StatefulWidget {
-  const JekoPaymentScreen({super.key, required this.amount});
+  const JekoPaymentScreen({super.key, required this.amount, required this.method});
   final double amount;
+  final String method;
   @override
   State<JekoPaymentScreen> createState() => _JekoPaymentScreenState();
 }
@@ -49,7 +50,7 @@ class _JekoPaymentScreenState extends State<JekoPaymentScreen> with WidgetsBindi
 
   Future<void> _start() async {
     try {
-      final res = await Repo.initDeposit(widget.amount);
+      final res = await Repo.initDeposit(widget.amount, widget.method);
       final tx = res['data'] as Map<String, dynamic>?;
       if (tx == null) throw ApiException('Réponse de paiement invalide.');
       if (tx['status'] == 'validated') {
